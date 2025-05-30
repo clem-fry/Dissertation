@@ -19,7 +19,7 @@ def find_steady_state(f, g, initial_guess):
     
 # %%
 
-def dispersion_relation_plot(f, g, Du, Dv, plot=True):
+def dispersion_relation_plot(f, g, Du, Dv, plot=True, save=False, save_path = "simulation_final.png"):
     u0, v0 = find_steady_state(f, g, initial_guess=(1.0, 0.0))
     #print("u0 =", u0, "v0 =", v0)
 
@@ -27,44 +27,99 @@ def dispersion_relation_plot(f, g, Du, Dv, plot=True):
     # k is the spatial frequency / wavenumber (how many cycles per unit length)
     k_vals = np.linspace(0.0, 5.0, 400)
     real_parts = []
+    prev_eigs = None
+    branch_1 = []
+    branch_2 = []
+
     for k_val in k_vals:
-        real, _ = models.dispersion(f, g, u0, v0, Du, Dv, k_val)
-        real_parts.append(real)
+        real_parts, _ = models.dispersion(f, g, u0, v0, Du, Dv, k_val)
+        if prev_eigs is None:
+            branch_1.append(real_parts[0])
+            branch_2.append(real_parts[1])
+            prev_eigs = real_parts
 
-    if plot:
-        plt.plot(k_vals, real_parts)
-        plt.axhline(0, color='k', linestyle='--')
-        plt.title('Dispersion Relation (Real part of λ vs k)')
-        plt.xlabel('Wave number k')
-        plt.ylabel('Re(λ)')
-        plt.grid(True)
-        plt.show()
+        else:
+            # Match current eigenvalues to previous based on continuity
+            if abs(real_parts[0] - prev_eigs[0]) < abs(real_parts[1] - prev_eigs[0]):
+                branch_1.append(real_parts[0])
+                branch_2.append(real_parts[1])
+                prev_eigs = real_parts
+            else:
+                branch_1.append(real_parts[1])
+                branch_2.append(real_parts[0])
+                prev_eigs = real_parts[::-1]
 
-    return(np.array(real_parts), k_vals)
+    branch_1 = np.array(branch_1)
+    branch_2 = np.array(branch_2)
+
+    if plot or save:
+        fig, ax = plt.subplots()
+        ax.plot(k_vals, branch_1, label="λ₁ (tracked)")
+        ax.plot(k_vals, branch_2, label="λ₂ (tracked)")
+        ax.axhline(0, color='k', linestyle='--')
+        ax.set_title('Dispersion Relation (Real part of λ vs k)')
+        ax.set_xlabel('Wave number k')
+        ax.set_ylabel('Re(λ)')
+        ax.grid(True)
+        if save:
+            fig.savefig(save_path)
+            if not plot:
+                plt.close(fig) 
+        if plot:
+            plt.show()
+
+    return(branch_1, branch_2, k_vals)
 # %%
+from scipy.signal import find_peaks
 
 def suggest_parameters(param_ranges, model, n_trials=1000):
     # Set ranges for parameters
 
     valid_params = []
 
-    for _ in range(n_trials):
-        a = np.random.uniform(*param_ranges['a'])
-        b = np.random.uniform(*param_ranges['b'])
-        e = np.random.uniform(*param_ranges['e'])
-        d = np.random.uniform(*param_ranges['d'])
-        c = np.random.uniform(*param_ranges['c'])
-        w = np.random.uniform(*param_ranges['w'])
-        Du = np.random.uniform(*param_ranges['Du'])
-        Dv = np.random.uniform(*param_ranges['Dv'])
+    for n in range(n_trials):
+        if n % 100 == 0:
+            print(n)
+        peak = False
+        a = round(np.random.uniform(*param_ranges['a']), 3)
+        b = round(np.random.uniform(*param_ranges['b']), 3)
+        e = round(np.random.uniform(*param_ranges['e']), 3)
+        d = round(np.random.uniform(*param_ranges['d']), 3)
+        c = round(np.random.uniform(*param_ranges['c']), 3)
+        w = round(np.random.uniform(*param_ranges['w']), 3)
+        Du = round(np.random.uniform(*param_ranges['Du']), 3)
+        Dv = round(np.random.uniform(*param_ranges['Dv']), 3)
 
-        f, g = model(a, b, e, d, c=c, w=w)
+        f, g = model(a, b, c, d, e, w)
         if np.all(turing_check(f, g, Du, Dv)):
-            valid_params.append((a, b, c, d, e, w, Du, Dv))
+            branch1, branch2, k_vals = dispersion_relation_plot(f, g, Du, Dv, plot=False)
+            peak1, _ = find_peaks(branch1)
+            peak2, _ = find_peaks(branch2)
+            peaks = np.append(peak1, peak2)
+
+            real_parts_branch = np.maximum(branch1, branch2)
+            peak_lamda = np.max(real_parts_branch)
+            peak_k = k_vals[np.argmax(real_parts_branch)]
+            unstable_indices = np.where(real_parts_branch > 0)[0]
+            if len(unstable_indices) > 0:
+                k_min = k_vals[unstable_indices[0]]
+                k_max = k_vals[unstable_indices[-1]]
+                unstable_band_width = k_max - k_min
+                area = np.trapz(real_parts_branch[unstable_indices], k_vals[unstable_indices])
+            else:
+                unstable_band_width = 0
+                area = 0
+
+            if len(peaks) != 0:
+                peak = True
+
+            valid_params.append((a, b, c, d, e, w, Du, Dv, peak, peak_lamda, peak_k, unstable_band_width, area))
 
     print(f"Found {len(valid_params)} parameter sets with positive steady states out of {n_trials} trials.")
     for params in valid_params[:10]:  # print first 10 valid sets
         print(f"{params[0]:.3f}, {params[1]:.3f}, {params[2]:.3f}, {params[3]:.3f}, {params[4]:.3f}, {params[5]:.3f}, {params[6]:.3f}, {params[7]:.3f}")
+
+    return valid_params
 
 # Run to get suggestions
 #suggest_parameters()
@@ -81,7 +136,7 @@ def turing_check(f, g, Du, Dv, verbose=False):
             print('non-spacial system is unstable - not turing instability')
         return False, False # undefined steady state
 
-    if (u0 > 0) and (v0 > 0): # nonspacial stability
+    if np.all(models.nonspacial_eigenvalues(f, g) > 0): # nonspacial stability
         nonspacial_stability = True
 
     # spacial instability - real part of leading eigenvalue is positive

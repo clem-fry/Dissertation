@@ -4,7 +4,7 @@ import numpy as np
 from scipy.linalg import eigvals
 import cmath
 
-def linear(a, b, e, d, c=0, w=0):
+def linear(a, b, c, d, e, w):
     def f(u, v):
         return(a*u + b*v + c)
 
@@ -40,6 +40,25 @@ def schnakenberg(a, b):
     
     return f, g
 # %%
+
+def nonspacial_eigenvalues(f, g):
+    # for no diffusion - 
+    u = sp.symbols('u')
+    v = sp.symbols('v')
+
+    F = f(u, v)
+    G = g(u, v)
+
+    J = sp.Matrix([
+        [sp.diff(F, u), sp.diff(F, v)],
+        [sp.diff(G, u), sp.diff(G, v)]
+    ])
+
+    #jacobian_numeric = np.array(jacobian.subs({u: u0, v: v0})).astype(np.float64)
+    eigenvalues = J.eigenvals()
+    eigenvalues_array = np.array([float(ev.evalf().as_real_imag()[0]) for ev in eigenvalues])
+    return eigenvalues_array
+
 
 def dispersion(f, g, u0, v0, Du, Dv, k):
     # for no diffusion - 

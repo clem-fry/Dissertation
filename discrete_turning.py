@@ -90,12 +90,17 @@ n = int(T/dt) # number of iterations
 # x_coords = np.linspace(-1, 1, grid_size) # threshold 1.5 gives circles
 # y_coords = np.linspace(-1, 1, grid_size)
 
-def plot_nodes(valid_nodes, ax, i):
+def plot_nodes(valid_nodes, ax, i, save=False):
     x_coords = [node.x if node is not None  else None for node in valid_nodes]
     y_coords = [node.y if node is not None  else None for node in valid_nodes]
     u_values = [node.u if node is not None  else None for node in valid_nodes]
 
-    scatter = ax.scatter(x_coords, y_coords, c=u_values, cmap='viridis', s=100, edgecolors='k')
+    if save:
+        s = 600
+    else:
+        s = 100
+
+    scatter = ax.scatter(x_coords, y_coords, c=u_values, cmap='viridis', s=s, edgecolors='k')
     ax.set_xlabel('X position')
     ax.set_ylabel('Y position')
     ax.set_title(f't={i * dt:.2f}')
@@ -104,20 +109,6 @@ def plot_nodes(valid_nodes, ax, i):
     ax.set_axis_off()
     return scatter
 
-def easy_plot(valid_nodes):
-    fig, ax = plt.subplots(1, 1, figsize=(8, 8))
-
-    x_coords = [node.x if node is not None  else None for node in valid_nodes]
-    y_coords = [node.y if node is not None  else None for node in valid_nodes]
-    u_values = [node.u if node is not None  else None for node in valid_nodes]
-
-    scatter = ax.scatter(x_coords, y_coords, c=u_values, cmap='viridis', s=100, edgecolors='k')
-    ax.set_xlabel('X position')
-    ax.set_ylabel('Y position')
-    ax.set_title(f't={i * dt:.2f}')
-    #ax.invert_xaxis()
-    #ax.invert_yaxis()
-    ax.set_axis_off()
 #%% Create the nodes with random u and v values
 
 def shape_nodes(shape_check, grid_size):
@@ -160,7 +151,7 @@ def get_inward_node_value(x, y, coord_to_index, new_values): # NEUMAN
                 return new_values[coord_to_index[(rx, ry)]]
     return None  # no valid result
 
-def simulation(f, g, Du, Dv, grid_size=20, n = 1000, dt = 0.01, show=True):
+def simulation(f, g, Du, Dv, grid_size=20, n = 1000, dt = 0.01, show=True, save=False, save_path="simulation_final.png"):
     # creates all nodes
     all_nodes, border_nodes = shape_nodes(shapes.grid_check, grid_size)
     if show:
@@ -184,21 +175,21 @@ def simulation(f, g, Du, Dv, grid_size=20, n = 1000, dt = 0.01, show=True):
         v_vector = np.array([float(node.v) for node in valid_nodes])
         laplacian_v = laplacian(degree_matrix, adjacency_matrix, v_vector)
 
-        if np.any(np.isnan(u_vector)) or np.any(np.isnan(u_vector)):
+        if np.any(np.isnan(u_vector)) or np.any(np.isnan(v_vector)):
             print('blow up detected')
             return u_vector, v_vector
         
         # i have moved du dv coefficients into dudt and dvdt instead of new_u and new_v
-        dudt = f(u_vector, v_vector) +  laplacian_u
-        dvdt = g(u_vector, v_vector) +  laplacian_v
+        dudt = f(u_vector, v_vector) + Du * laplacian_u
+        dvdt = g(u_vector, v_vector) + Dv * laplacian_v
 
-        new_u =  Du * dudt * dt + u_vector
-        new_v = Dv * dvdt * dt + v_vector
+        new_u = dudt * dt + u_vector
+        new_v = dvdt * dt + v_vector
 
         for node in valid_nodes:
             if node == None:
                 continue
-            # if node not in border_nodes:
+            # if node not None:
             node_index = coord_to_index[(int(node.x), int(node.y))]
             node.u = new_u[node_index]
             node.v = new_v[node_index]
@@ -208,8 +199,17 @@ def simulation(f, g, Du, Dv, grid_size=20, n = 1000, dt = 0.01, show=True):
             scatter = plot_nodes(valid_nodes, ax=ax, i=i)
             #easy_plot(valid_nodes)
 
-    if show:
-        plt.tight_layout()  # Adjust spacing between subplots
+    if save:
+        # Create a single figure and axis for final plot
+        fig, ax = plt.subplots(figsize=(6, 6))
+        scatter = plot_nodes(valid_nodes, ax=ax, i=n, save=True)
+        plt.tight_layout()
+        plt.savefig(save_path)
+        plt.close(fig)
+        print(f"Simulation final plot saved to {save_path}")
+
+    elif show:
+        plt.tight_layout()
         plt.show()
 
     u_vector = np.array([float(node.u) for node in valid_nodes])

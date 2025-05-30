@@ -11,7 +11,6 @@ importlib.reload(discrete_turning)
 importlib.reload(models)
 importlib.reload(evaluation)
 #%%
-Du = 0.2; Dv = 10
 # morphogenesis: a = A - gamma
 # f(u, v) = (Au + Bv + C )- gamma_u u
 # g(u, v) = (Eu - F) - gamma_v v -> ( F = w)
@@ -20,18 +19,20 @@ Du = 0.2; Dv = 10
 
 a, b, c, d, e, w= 0.05, -0.08, 0.03, 0.1, -0.06, -0.12
 # morhpogensis - scaled by 160 - scaled by du and dv
-a, b, c, d, e, w = 4, -6.4, 2.4, 160, -96, -192
-a, b, c, d, e, w = 80, -12.8, 4.8, 16, -9.6, -19.2
+#a, b, c, d, e, w = 40, -6.4, 2.4, 160, -96, -192 <- some spots
+a, b, c, d, e, w = 8, -12.8, 4.8, 16, -9.6, -19.2 #<- some stripes
 
-f, g = models.linear(a, b, e, d, c=c, w=w)
+f, g = models.linear(a, b, c, d, e, w)
 
 grid_size = 20 # size of the 2D grid or square root of total number of robots
-T = 10.0 # total time
+T = 15.0 # total time
 dt = 0.001 # time step
 n = int(T/dt) # number of iterations
 Du, Dv = 0.5, 10
 
 u, v = discrete_turning.simulation(f, g, Du, Dv, n=n, dt=dt, show=True)
+evaluation.turing_check(f, g, Du, Dv)
+
 # %%
 from scipy.signal import find_peaks
 from scipy.optimize import minimize
@@ -42,37 +43,74 @@ from scipy.optimize import minimize
 
 #%%
 
-param_ranges = {
-        'a': (50, 100),
-        'b': (-20, 20),
-        'c': (0, 20),   # c and d positive to keep reaction meaningful
-        'd': (0, 20),
-        'e': (-20, 20),
-        'w': (-50, 20),
-        'Du': (0.1, 1),
-        'Dv': (5, 15)
-    }
 
-model = models.linear
-evaluation.suggest_parameters(param_ranges, model)
+# (a, b, c, d, e, w, Du, Dv, peak, peak_lamda, peak_k, unstable_band_width, area)
 
+
+
+#%%
+# some k = 2.4 start becoming overly pixelated and more difficult
+# could be worked on?
+# k = 0.5 gives max two spots
+# k = 0.8 gives approx 3 (1 across)
+# k = 1 -> 5 (1.5 across)
+# k = 1.5 -> 9 (3 across)
+# k = 2 -> 13 (3.5 across?)
+
+k_val = 2
+indices = [i for i, param in enumerate(valid_params) if param[10] > 0]
+peak_ks_positive = np.array([valid_params[i][10] for i in indices])
+differences = np.abs(peak_ks_positive - k_val)
+closest_indices = np.array(indices)[np.argsort(differences)[:5]]
+
+#%%
+top_indices = [p for _, p, _ in scored_params[0:5]]
+top_indices = np.array(top_indices)
+
+for i in closest_indices:
+    a, b, c, d, e, w, Du, Dv = valid_params[i][0:8]
+    f, g = models.linear(a, b, c, d, e, w)
+    u, v = discrete_turning.simulation(f, g, Du, Dv, n=n, dt=dt, show=False, save=True, save_path=f"plots/simulation_plot_{i}.png")
+    print(evaluation.turing_check(f, g, Du, Dv))
+    _ = evaluation.dispersion_relation_plot(f, g, Du, Dv, plot=False, save=True, save_path=f"plots/dispersion_plot_{i}.png")
+
+import matplotlib.image as mpimg
+
+fig, axes = plt.subplots(5, 2, figsize=(12, 20))
+
+for idx, i in enumerate(closest_indices):
+    sim_img = mpimg.imread(f"plots/simulation_plot_{i}.png")
+    disp_img = mpimg.imread(f"plots/dispersion_plot_{i}.png")
+    
+    axes[idx, 0].imshow(sim_img)
+    axes[idx, 0].axis('off')
+    axes[idx, 0].set_title(f'Simulation {i}')
+    
+    axes[idx, 1].imshow(disp_img)
+    axes[idx, 1].axis('off')
+    axes[idx, 1].set_title(f'Dispersion Relation {i}')
+
+plt.tight_layout()
+plt.show()
 
 #%%
 def loss_function(params):
     a, b, c, d, e, w, Du, Dv = params
-    f, g = models.linear(a, b, e, d, c=c, w=w)
+    f, g = models.linear(a, b, c, d, e, w)
     if not np.any(evaluation.turing_check(f, g, Du, Dv)):
         return 10e10
     
     real_parts, k_vals = evaluation.dispersion_relation_plot(f, g, Du, Dv, plot=False)
-    max_growth = np.max(real_parts)
-    if max_growth <= 0:
-        return abs(max_growth) + 100
+    peak1, _ = find_peaks(real_parts[:, 0])
+    peak2, _ = find_peaks(real_parts[:, 1])
+    peaks = np.append(peak1, peak2)
+    if len(peaks) == 0:
+        return 10e10
     
     else:
-        return -max_growth
+        return -np.max(peaks)
 
-result = minimize(loss_function, (35.755, -7.766, 37.333, 36.619, -7.866, 20.187, 0.041, 27.742))
+result = minimize(loss_function, (19.319, 5.589, -7.764, -4.133, 10.384, -11.089, 0.787, 8.588))
 
 #%%
 a, b, c, d, e, w = 89.095, -19.115, 19.419, 17.184, 4.539, -10.605
@@ -84,7 +122,7 @@ Du, Dv =  0.798, 6.887
 #for d in params:
     # check for local stability
 
-f, g = models.linear(a, b, e, d, c=c, w=w)
+f, g = models.linear(a, b, c, d, e, w)
 
 def check_for_instability(f, g, Du, Dv):
     if np.all(evaluation.turing_check(f, g, Du, Dv)):
