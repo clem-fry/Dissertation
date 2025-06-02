@@ -111,7 +111,7 @@ def plot_nodes(valid_nodes, ax, i, save=False):
 
 #%% Create the nodes with random u and v values
 
-def shape_nodes(shape_check, grid_size):
+def shape_nodes(shape_check, grid_size, initial_conditions):
     x_coords = np.arange(1, grid_size+1, 1)
     y_coords = np.arange(1, grid_size+1, 1)
     r = grid_size/2
@@ -120,40 +120,40 @@ def shape_nodes(shape_check, grid_size):
     node_id = 0
     for y in y_coords:
         for x in x_coords:
+            u = initial_conditions[node_id, 0] # np.random.rand()  # Random u value between 0 and 1
+            v = initial_conditions[node_id, 1] #np.random.rand()  # Random v value between 0 and 1
+            
             if shape_check(r, (x, y)): # if in shape
-                u = np.random.rand()  # Random u value between 0 and 1
-                v = np.random.rand()  # Random v value between 0 and 1
                 node = Node(id=node_id, x=x, y=y, u=u, v=v)
-                    
-                node_id += 1
                 all_nodes[node.x -1, node.y -1] = node
-
                 neighbours = np.array([(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)])
                 # if any of the neighbours are outside the circle
                 if np.any(~shape_check(r, neighbours)):
                         border_nodes.append(node) 
 
+            node_id += 1
+
     return(all_nodes, border_nodes)
 
 # %%
-def get_inward_node_value(x, y, coord_to_index, new_values): # NEUMAN
-    # neuman boundary conditions. check all around for perpendicular
-    directions = [(-1, 0), (1, 0), (0, -1), (0, 1),
-                  (-1, -1), (-1, 1), (1, -1), (1, 1)]
+# def get_inward_node_value(x, y, coord_to_index, new_values): # NEUMAN
+#     # neuman boundary conditions. check all around for perpendicular
+#     directions = [(-1, 0), (1, 0), (0, -1), (0, 1),
+#                   (-1, -1), (-1, 1), (1, -1), (1, 1)]
 
-    for dx, dy in directions:
-        nx, ny = x + dx, y + dy # find new coordinates
-        if (nx, ny) not in coord_to_index:
-            # not a node on the outside so perpendicular edge
-            rx, ry = x - dx, y - dy
-            if (rx, ry) in coord_to_index:
-                # returns index of perpendicular node
-                return new_values[coord_to_index[(rx, ry)]]
-    return None  # no valid result
+#     for dx, dy in directions:
+#         nx, ny = x + dx, y + dy # find new coordinates
+#         if (nx, ny) not in coord_to_index:
+#             # not a node on the outside so perpendicular edge
+#             rx, ry = x - dx, y - dy
+#             if (rx, ry) in coord_to_index:
+#                 # returns index of perpendicular node
+#                 return new_values[coord_to_index[(rx, ry)]]
+#     return None  # no valid result
 
-def simulation(f, g, Du, Dv, grid_size=20, n = 1000, dt = 0.01, show=True, save=False, save_path="simulation_final.png"):
+def simulation(f, g, Du, Dv, grid_size=20, n = 10000, dt = 0.001, initial_conditions = np.random.rand(400, 2), shape = shapes.grid_check, show=True, save=False, save_path="simulation_final.png"):
     # creates all nodes
-    all_nodes, border_nodes = shape_nodes(shapes.grid_check, grid_size)
+    all_nodes, border_nodes = shape_nodes(shape, grid_size, initial_conditions)
     if show:
         fig, axes = plt.subplots(3, 3, figsize=(8, 8))
     step_plot = n // 9
@@ -163,7 +163,6 @@ def simulation(f, g, Du, Dv, grid_size=20, n = 1000, dt = 0.01, show=True, save=
 
     adjacency_matrix = compute_adjacency_matrix(valid_nodes)
     degree_matrix = compute_degree_matrix(adjacency_matrix)
-
 
     for i in range(n):
         if i % 1000 == 0 and show:

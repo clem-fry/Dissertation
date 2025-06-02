@@ -6,10 +6,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import importlib
 import parameters
+import shapes
 #%%
 importlib.reload(discrete_turning)
 importlib.reload(models)
 importlib.reload(evaluation)
+importlib.reload(shapes)
 importlib.reload(parameters)
 
 #%%
@@ -27,7 +29,7 @@ a, b, c, d, e, w = 8, -12.8, 4.8, 16, -9.6, -19.2 #<- some stripes
 f, g = models.linear(a, b, c, d, e, w)
 
 grid_size = 20 # size of the 2D grid or square root of total number of robots
-T = 15.0 # total time
+T = 30.0 # total time
 dt = 0.001 # time step
 n = int(T/dt) # number of iterations
 Du, Dv = 0.5, 10
@@ -70,7 +72,7 @@ with open('valid_params.txt', 'r') as file:
 # k = 1.5 -> 9 (3 across)
 # k = 2 -> 13 (3.5 across?)
 
-k_val = 1
+k_val = 2
 num_selected = 10
 
 indices = [i for i, param in enumerate(valid_params) if param[10] > 0]
@@ -80,7 +82,24 @@ closest_indices = np.array(indices)[np.argsort(differences)[:num_selected]]
 
 #%% PLOT PATTERN AND DISPERSION FOR DIFFERENT PARAMETERS
 
-parameters.plot_dispersion_turing(valid_params, closest_indices[:5])
+# n = 10000
+
+initial_conditions = np.ones((400, 2)) /2
+parameters.plot_dispersion_turing(valid_params, closest_indices[:5], initial_conditions=initial_conditions)
+
+#%% SPECIFIC REPEAT?
+a, b, c, d, e, w, Du, Dv = valid_params[698][:8]
+f, g = models.linear(a, b, c, d, e, w)
+
+# initial not same u and v
+initial_conditions = np.column_stack((np.full(400, 0.2), np.full(400, 0.8)))
+
+initial_conditions = np.ones((400, 2)) /2
+
+shape = shapes.small_grid_check
+n = 20000
+u, v = discrete_turning.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=True)
+#evaluation.turing_check(f, g, Du, Dv)
 
 #%% SCORING SYSTEM?
 selected_params = [valid_params[i] for i in closest_indices]
@@ -90,10 +109,40 @@ top_indices = np.array(closest_indices[top_indices])
 
 parameters.plot_dispersion_turing(valid_params, top_indices)
 
-#%% TRY TO MINIMISE AROUND FUNCTION?
-from scipy.signal import minimize
+#%% CHANGING SHAPE?
 
-result = minimize(parameters.loss_function, (19.319, 5.589, -7.764, -4.133, 10.384, -11.089, 0.787, 8.588))
+a, b, c, d, e, w, Du, Dv = valid_params[698][:8]
+f, g = models.linear(a, b, c, d, e, w)
+
+initial_conditions = np.ones((400, 2)) /2
+#initial_conditions = np.column_stack((np.full(400, 0.2), np.full(400, 0.8)))
+
+shape = shapes.small_grid_check
+n = 10000
+u, v = discrete_turning.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=True)
+
+r = 20 
+inner_min = r // 4 # small grid conditions
+inner_max = 3 * r // 4
+
+x, y = np.meshgrid(np.arange(r), np.arange(r))
+coords = np.stack([x.ravel(), y.ravel()], axis=1)  # shape (400, 2)
+
+mask = (inner_min <= coords[:, 0]) & (coords[:, 0] < inner_max) & \
+       (inner_min <= coords[:, 1]) & (coords[:, 1] < inner_max)
+
+u_array = np.ones(400)
+v_array = np.ones(400)
+
+u_array[mask] = u
+v_array[mask] = v
+
+initial_conditions = np.column_stack((u_array, v_array))
+shape = shapes.grid_check
+n = 20000
+u, v = discrete_turning.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=True)
+
+# plt.scatter(np.arange(len(u)), u)
 
 #%% GENERAL TURING CHECK
 a, b, c, d, e, w, Du, Dv = valid_params[278][:8]
@@ -116,11 +165,3 @@ sns.pairplot(df, vars=['a', 'b', 'c', 'd', 'e', 'w', 'Du', 'Dv'],
 plt.suptitle('Parameter Pairwise Comparison (colored by area)', y=1.02)
 plt.show()
 
-# %% BIFURCATION - NOT YET RELEVANT
-
-# the measure of pattern strength isnt very sophisticated
-a_vals = np.linspace(0, 1, 11)
-b_vals = np.linspace(0, 1, 11)
-
-model = models.gray_scott
-evaluation.bifurcation(a_vals, b_vals, model, Du, Dv)

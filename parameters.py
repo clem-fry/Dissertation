@@ -49,14 +49,16 @@ def score_params(valid_params):
 
     return scored_params
 
-def plot_dispersion_turing(valid_params, indicies):
+def plot_dispersion_turing(valid_params, indicies, initial_conditions=None):
     for i in indicies:
         a, b, c, d, e, w, Du, Dv = valid_params[i][0:8]
         f, g = models.linear(a, b, c, d, e, w)
-        u, v = discrete_turning.simulation(f, g, Du, Dv, show=False, save=True, save_path=f"plots/simulation_plot_{i}.png")
+        if np.any(initial_conditions == None):
+            u, v = discrete_turning.simulation(f, g, Du, Dv, show=False, save=True, save_path=f"plots/simulation_plot_{i}.png")
+        else:
+            u, v = discrete_turning.simulation(f, g, Du, Dv, initial_conditions = initial_conditions, show=False, save=True, save_path=f"plots/simulation_plot_{i}.png")
         print(evaluation.turing_check(f, g, Du, Dv))
         _ = evaluation.dispersion_relation_plot(f, g, Du, Dv, plot=False, save=True, save_path=f"plots/dispersion_plot_{i}.png")
-
 
     fig, axes = plt.subplots(5, 2, figsize=(12, 20))
 
