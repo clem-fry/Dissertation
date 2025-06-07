@@ -42,14 +42,14 @@ evaluation.turing_check(f, g, Du, Dv)
 # ideally there should be a peak
 
 #%%
-# (a, b, c, d, e, w, Du, Dv, peak, peak_lamda, peak_k, unstable_band_width, area)
+# (a, b, c, d, e, w, Du, Dv, peak/width, peak_lamda, peak_k, unstable_band_width, area, peak/area)
 
 # import parameter information from txt file
 import ast
 import re
 
 valid_params = []
-with open('valid_params.txt', 'r') as file:
+with open('valid_params_scored.txt', 'r') as file:
     for line in file:
         line = line.strip()
         # Remove trailing dot if present (optional)
@@ -72,75 +72,204 @@ with open('valid_params.txt', 'r') as file:
 # k = 1.5 -> 9 (3 across)
 # k = 2 -> 13 (3.5 across?)
 
-k_val = 2
-num_selected = 10
+dx = 1
+kx = 2 * np.pi * np.fft.fftfreq(grid_size, d=dx)
+ky = 2 * np.pi * np.fft.fftfreq(grid_size, d=dx)
+kx_grid, ky_grid = np.meshgrid(kx, ky, indexing='ij')
+
+k_magnitudes = np.sqrt(kx_grid**2 + ky_grid**2).flatten()
+k_unique = np.unique(np.round(k_magnitudes, decimals=6))  # to remove duplicate magnitudes
+
+# k_unique = [0. , 0.314159, 0.444288, 0.628319, 0.702481, 0.888577,
+    #    0.942478, 0.993459, 1.132717, 1.256637, 1.295312, 1.332865,
+    #    1.404963, 1.570796, 1.601904, 1.691799, 1.777153, 1.831848,
+    #    1.884956, 1.910956, 1.986918, 2.011601, 2.107444, 2.199115,
+    #    2.221441, 2.265435, 2.287114, 2.392566, 2.453662, 2.513274,
+    #    2.532833, 2.590624, 2.66573 , 2.684178, 2.7025  , 2.809926,
+    #    2.827433, 2.844833, 2.896405, 2.963773, 2.980376, 3.09411 ,
+    #    3.110018, 3.141593, 3.157262, 3.203808, 3.234468, 3.279919,
+    #    3.339559, 3.383599, 3.398152, 3.512407, 3.554306, 3.581967,
+    #    3.663695, 3.782979, 3.834803, 3.998595, 4.023202, 4.226581,
+    #    4.442883]
+#%%
+# peak/area with 1.404963 is good
+# k = 2.66  and 0.314159 rubbish regardless of scoring - wavelength too big
+ # k between 0.0888577 ->
+k_val = 1.404963
+num_selected = 20
 
 indices = [i for i, param in enumerate(valid_params) if param[10] > 0]
+
+# find the k value at peak and the peak/width score
 peak_ks_positive = np.array([valid_params[i][10] for i in indices])
+# param[8] = peak/width (prioritise crispness); param[-1] = peak/area (robust?) prefer this?
+scores = np.array([valid_params[i][-1] for i in indices]) 
+
 differences = np.abs(peak_ks_positive - k_val)
-closest_indices = np.array(indices)[np.argsort(differences)[:num_selected]]
+
+# combine these and sort - then pick out these indicies
+composite_scores = (1 / (1 + differences) ** 2) * scores
+sorted_indices = np.argsort(-composite_scores)
+closest_indices = np.array(indices)[sorted_indices[:num_selected]]
 
 #%% PLOT PATTERN AND DISPERSION FOR DIFFERENT PARAMETERS
 
 # n = 10000
 
 initial_conditions = np.ones((400, 2)) /2
-parameters.plot_dispersion_turing(valid_params, closest_indices[:5], initial_conditions=initial_conditions)
+#initial_conditions = np.random.rand(400, 2)
+#grid_size = 6  
+parameters.plot_dispersion_turing(valid_params, closest_indices[:5], initial_conditions=initial_conditions) #, initial_conditions=initial_conditions
 
 #%% SPECIFIC REPEAT?
-a, b, c, d, e, w, Du, Dv = valid_params[698][:8]
-f, g = models.linear(a, b, c, d, e, w)
+grid_size = 20
+params = valid_params[1181][:8]
+a, b, c, d, e, w, Du, Dv = params
+model = models.linear
+f, g = model(a, b, c, d, e, w)
 
 # initial not same u and v
 initial_conditions = np.column_stack((np.full(400, 0.2), np.full(400, 0.8)))
 
 initial_conditions = np.ones((400, 2)) /2
+initial_conditions = np.random.rand(400, 2)
 
-shape = shapes.small_grid_check
-n = 20000
-u, v = discrete_turning.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=True)
+shape = shapes.grid_check
+n = 30000
+show = True
+u, v = discrete_turning.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=show)
 #evaluation.turing_check(f, g, Du, Dv)
+#%%
+evaluation.dispersion_plot(params, model, grid_size)
 
-#%% SCORING SYSTEM?
-selected_params = [valid_params[i] for i in closest_indices]
-scored_params = parameters.score_params(selected_params)
-top_indices = [p for _, p, _ in scored_params[0:5]]
-top_indices = np.array(closest_indices[top_indices])
+evaluation.fourier_spectrum_plot(u)
 
-parameters.plot_dispersion_turing(valid_params, top_indices)
+#%% scoring for robustness and sharpness with fourier spectrum
+
+
 
 #%% CHANGING SHAPE?
 
-a, b, c, d, e, w, Du, Dv = valid_params[698][:8]
+a, b, c, d, e, w, Du, Dv = valid_params[478][:8]
 f, g = models.linear(a, b, c, d, e, w)
 
 initial_conditions = np.ones((400, 2)) /2
 #initial_conditions = np.column_stack((np.full(400, 0.2), np.full(400, 0.8)))
 
-shape = shapes.small_grid_check
-n = 10000
-u, v = discrete_turning.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=True)
-
-r = 20 
-inner_min = r // 4 # small grid conditions
-inner_max = 3 * r // 4
-
-x, y = np.meshgrid(np.arange(r), np.arange(r))
-coords = np.stack([x.ravel(), y.ravel()], axis=1)  # shape (400, 2)
-
-mask = (inner_min <= coords[:, 0]) & (coords[:, 0] < inner_max) & \
-       (inner_min <= coords[:, 1]) & (coords[:, 1] < inner_max)
-
-u_array = np.ones(400)
-v_array = np.ones(400)
-
-u_array[mask] = u
-v_array[mask] = v
-
-initial_conditions = np.column_stack((u_array, v_array))
 shape = shapes.grid_check
-n = 20000
+n = 30000
 u, v = discrete_turning.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=True)
+
+#%%
+# adds the small grid into the big grid:
+def add_grid_in(u, v):
+    r = 20 
+    inner_min = r // 4 # small grid conditions
+    inner_max = 3 * r // 4
+
+    x, y = np.meshgrid(np.arange(r), np.arange(r))
+    coords = np.stack([x.ravel(), y.ravel()], axis=1)  # shape (400, 2)
+
+    mask = (inner_min <= coords[:, 0]) & (coords[:, 0] < inner_max) & \
+        (inner_min <= coords[:, 1]) & (coords[:, 1] < inner_max)
+
+    u_array = np.ones(400)
+    v_array = np.ones(400)
+
+    u_array[mask] = u
+    v_array[mask] = v
+    return u_array, v_array
+
+#%%
+def fix_u_nodes(u, perc=70):
+    def fixed_shape(r, coords):
+        grid_size = int(r*2)
+        coord_to_index = {
+        (i, j): (i - 1) * grid_size + (j - 1)
+        for i in range(1, grid_size + 1)
+        for j in range(1, grid_size + 1)
+        }
+        threshold = np.percentile(u, abs(perc))
+        # print('coords: ', coords)
+        if np.ndim(coords) == 1:
+            x, y = coords
+            key = (int(x), int(y))
+            if perc < 0:
+                mask = np.array([
+                    u[coord_to_index[key]] > threshold if key in coord_to_index else False
+                ])
+            else:
+                mask = np.array([
+                    u[coord_to_index[key]] < threshold if key in coord_to_index else False
+                ])
+        else:
+            x = coords[:, 0]
+            y = coords[:, 1]
+            # print('x: ', x)
+            # print('y: ', y)
+            if perc < 0:
+                mask = np.array([
+                    u[coord_to_index[(int(x), int(y))]] > threshold if (int(x), int(y)) in coord_to_index else False
+                    for x, y in coords
+                ])
+            else:
+                mask = np.array([
+                    u[coord_to_index[(int(x), int(y))]] < threshold if (int(x), int(y)) in coord_to_index else False
+                    for x, y in coords
+                ])
+            
+        return mask
+    
+    return fixed_shape
+    
+#%%
+
+def reshape_output(u, v):
+    u_reshape = u.reshape(20, 20)
+    v_reshape = v.reshape(20, 20)
+    u_reshape = u_reshape.T 
+    v_reshape = v_reshape.T 
+    u_reshape = u_reshape.flatten() 
+    v_reshape = v_reshape.flatten() 
+    return u_reshape, v_reshape
+
+#%%
+u_reshape, v_reshape = reshape_output(u, v)
+initial_conditions = np.column_stack((u_reshape, v_reshape))
+shape = fix_u_nodes(u, perc=95)
+n = 20000
+u_new, v_new = discrete_turning.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=True)
+
+#%%
+def apply_mask_with_fill(u, grid_size, mask, fill_value=np.nan): # refill to grid size before removal
+    result = np.full(grid_size**2, fill_value, dtype=float)  # create full
+    print(len(u))
+    result[mask] = u  # fill values where mask True
+    return result
+
+x_coords = np.arange(1, grid_size+1, 1)
+y_coords = np.arange(1, grid_size+1, 1)
+xx, yy = np.meshgrid(x_coords, y_coords) 
+coords = np.stack([xx.ravel(), yy.ravel()], axis=1) 
+r = grid_size/2
+# recreate the shape restrictions of the last iteration and create the mask
+reshape_u, _ = reshape_output(u, u)
+shape = fix_u_nodes(reshape_u)
+mask = shape(r, coords)
+
+# fill in this mask so its back to a 20x20 grid, but the extra ones will be excluded
+u_full = apply_mask_with_fill(u_new, grid_size, mask, fill_value=(max(u_new)))
+v_full = apply_mask_with_fill(v_new, grid_size, mask, fill_value=(max(u_new)))
+# reshape ready to go
+u_reshape, v_reshape = reshape_output(u_full, v_full)
+
+# resend with the new info
+initial_conditions = np.column_stack((u_reshape, v_reshape))
+# new shape reapplies condition
+shape = fix_u_nodes(u_full, perc=60)
+n = 20000
+u_newest, v_newest = discrete_turning.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=True)
+
 
 # plt.scatter(np.arange(len(u)), u)
 

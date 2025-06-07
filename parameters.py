@@ -8,12 +8,12 @@ from scipy.signal import find_peaks
 
 def find_params():
     param_ranges = {
-        'a': (-20, 20),
-        'b': (-20, 20),
-        'c': (-20, 20),   # c and d positive to keep reaction meaningful
-        'd': (-20, 20),
-        'e': (-20, 20),
-        'w': (-20, 20),
+        'a': (-1, 1),
+        'b': (-1, 1),
+        'c': (-1, 1),  # c and d positive to keep reaction meaningful
+        'd': (-1, 1),
+        'e': (-1, 1),
+        'w': (-1, 1),
         'Du': (0.1, 1),
         'Dv': (5, 15)
     }
@@ -21,7 +21,7 @@ def find_params():
     model = models.linear
     valid_params = evaluation.suggest_parameters(param_ranges, model, n_trials = 5000)
 
-    with open('valid_params.txt', 'w') as f:
+    with open('valid_params_new.txt', 'w') as f:
         for item in valid_params:
             f.write(str(item) + '\n')
 
@@ -49,14 +49,15 @@ def score_params(valid_params):
 
     return scored_params
 
-def plot_dispersion_turing(valid_params, indicies, initial_conditions=None):
+def plot_dispersion_turing(valid_params, indicies, initial_conditions=None, grid_size = 20):
     for i in indicies:
         a, b, c, d, e, w, Du, Dv = valid_params[i][0:8]
         f, g = models.linear(a, b, c, d, e, w)
         if np.any(initial_conditions == None):
-            u, v = discrete_turning.simulation(f, g, Du, Dv, show=False, save=True, save_path=f"plots/simulation_plot_{i}.png")
+            u, v = discrete_turning.simulation(f, g, Du, Dv, n = 30000, show=False, save=True, grid_size=grid_size, save_path=f"plots/simulation_plot_{i}.png")
         else:
-            u, v = discrete_turning.simulation(f, g, Du, Dv, initial_conditions = initial_conditions, show=False, save=True, save_path=f"plots/simulation_plot_{i}.png")
+            u, v = discrete_turning.simulation(f, g, Du, Dv, n = 30000, initial_conditions = initial_conditions, grid_size=grid_size, show=False, save=True, save_path=f"plots/simulation_plot_{i}.png")
+        
         print(evaluation.turing_check(f, g, Du, Dv))
         _ = evaluation.dispersion_relation_plot(f, g, Du, Dv, plot=False, save=True, save_path=f"plots/dispersion_plot_{i}.png")
 

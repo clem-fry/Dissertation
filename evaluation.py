@@ -19,19 +19,26 @@ def find_steady_state(f, g, initial_guess):
     
 # %%
 
-def dispersion_relation_plot(f, g, Du, Dv, plot=True, save=False, save_path = "simulation_final.png"):
+def dispersion_relation_plot(f, g, Du, Dv, grid_size=20, plot=True, save=False, save_path = "simulation_final.png"):
     u0, v0 = find_steady_state(f, g, initial_guess=(1.0, 0.0))
     #print("u0 =", u0, "v0 =", v0)
 
     #eigenvalues, J = models.local_stability(f, g, u0, v0)
     # k is the spatial frequency / wavenumber (how many cycles per unit length)
-    k_vals = np.linspace(0.0, 5.0, 400)
+    #k_vals = np.linspace(0.0, 5.0, 400)
+    dx = 1
+    kx = 2 * np.pi * np.fft.fftfreq(grid_size, d=dx)
+    ky = 2 * np.pi * np.fft.fftfreq(grid_size, d=dx)
+    kx_grid, ky_grid = np.meshgrid(kx, ky, indexing='ij')
+
+    k_magnitudes = np.sqrt(kx_grid**2 + ky_grid**2).flatten()
+    k_unique = np.unique(np.round(k_magnitudes, decimals=6))  # to remove duplicate magnitudes
     real_parts = []
     prev_eigs = None
     branch_1 = []
     branch_2 = []
 
-    for k_val in k_vals:
+    for k_val in k_unique:
         real_parts, _ = models.dispersion(f, g, u0, v0, Du, Dv, k_val)
         if prev_eigs is None:
             branch_1.append(real_parts[0])
@@ -54,8 +61,8 @@ def dispersion_relation_plot(f, g, Du, Dv, plot=True, save=False, save_path = "s
 
     if plot or save:
         fig, ax = plt.subplots()
-        ax.plot(k_vals, branch_1, label="λ₁ (tracked)")
-        ax.plot(k_vals, branch_2, label="λ₂ (tracked)")
+        ax.plot(k_unique, branch_1, '*', markersize=4, label="λ₁ (tracked)")
+        ax.plot(k_unique, branch_2, '*', markersize=4, label="λ₂ (tracked)")
         ax.axhline(0, color='k', linestyle='--')
         ax.set_title('Dispersion Relation (Real part of λ vs k)')
         ax.set_xlabel('Wave number k')
@@ -68,7 +75,7 @@ def dispersion_relation_plot(f, g, Du, Dv, plot=True, save=False, save_path = "s
         if plot:
             plt.show()
 
-    return(branch_1, branch_2, k_vals)
+    return(branch_1, branch_2, k_unique)
 # %%
 from scipy.signal import find_peaks
 
@@ -80,7 +87,7 @@ def suggest_parameters(param_ranges, model, n_trials=1000):
     for n in range(n_trials):
         if n % 100 == 0:
             print(n)
-        peak = False
+        # peak = False
         a = round(np.random.uniform(*param_ranges['a']), 3)
         b = round(np.random.uniform(*param_ranges['b']), 3)
         e = round(np.random.uniform(*param_ranges['e']), 3)
@@ -110,10 +117,12 @@ def suggest_parameters(param_ranges, model, n_trials=1000):
                 unstable_band_width = 0
                 area = 0
 
-            if len(peaks) != 0:
-                peak = True
+            peak_width = peak_lamda / unstable_band_width if unstable_band_width > 0 else 0
+            peak_area = peak_lamda / area if area > 0 else 0
+            # if len(peaks) != 0:
+            #     peak = True
 
-            valid_params.append((a, b, c, d, e, w, Du, Dv, peak, peak_lamda, peak_k, unstable_band_width, area))
+            valid_params.append((a, b, c, d, e, w, Du, Dv, peak_width, peak_lamda, peak_k, unstable_band_width, area, peak_area))
 
     print(f"Found {len(valid_params)} parameter sets with positive steady states out of {n_trials} trials.")
     for params in valid_params[:10]:  # print first 10 valid sets
@@ -174,4 +183,62 @@ def bifurcation(a_vals, b_vals, model, Du, Dv):
     plt.xlabel('a')
     plt.ylabel('b')
     plt.title('Bifurcation Map of Model')
+    plt.show()
+
+def dispersion_plot(params, model, grid_size):
+    # The brightest areas (where Re(λ) is largest) show the wavevectors most likely to dominate.
+    # A circular ring means that all directions of a certain wave number (magnitude) are unstable
+    #  — leads to isotropic patterns like spots.
+    # A striped unstable region would favor certain directions
+    #  — leads to anisotropic patterns like stripes or ridges.
+
+    a, b, c, d, e, w, Du, Dv = params
+    f, g = model(a, b, c, d, e, w)
+    u0, v0 = find_steady_state(f, g, initial_guess=(1.0, 0.0))
+
+    def dispersion(k_mag):
+        real_parts, _ = models.dispersion(f, g, u0, v0, Du, Dv, k_mag)
+        return max(real_parts)
+
+    dx = 1 # use the relevant k values
+    kx = 2 * np.pi * np.fft.fftfreq(grid_size, d=dx)
+    ky = 2 * np.pi * np.fft.fftfreq(grid_size, d=dx) # INCLUDES DIAGONAL WAVES
+    kx_grid, ky_grid = np.meshgrid(kx, ky, indexing='ij')
+
+    k_mags = np.sqrt(kx_grid**2 + ky_grid**2)
+
+    # find the dispersion value for each k
+    dispersion_grid = np.vectorize(dispersion)(k_mags)
+
+    dispersion_shifted = np.fft.fftshift(dispersion_grid)
+
+    # Plot
+    plt.imshow(dispersion_shifted, extent=[kx.min(), kx.max(), ky.min(), ky.max()],
+            cmap='coolwarm', origin='lower')
+    plt.title("Dispersion: Re(λ) over (kₓ, k_y)")
+    plt.xlabel("kₓ")
+    plt.ylabel("k_y")
+    plt.colorbar(label="Re(λ)")
+    plt.show()
+
+def fourier_spectrum_plot(u):
+    # stripe has two strong peaks
+    # dot grid (hexagonal spots) has peaks forming a hexagonal symmetry.
+    # Noise has a broad, featureless spectrum.
+    # Symmetry in the Fourier plot reflects symmetry in the spatial pattern.
+    # Peaks = dominant spatial frequencies (wavelengths or periodicities).
+
+    u_reshaped = np.reshape(u, (20, 20)) 
+
+    U_fft = np.fft.fft2(u_reshaped)
+    U_fft_shifted = np.fft.fftshift(U_fft)
+
+    power_spectrum = np.abs(U_fft_shifted)
+
+    # Plot
+    plt.imshow(power_spectrum, cmap='inferno', origin='lower')
+    plt.title("Fourier Spectrum of u(x, y)")
+    plt.xlabel("k_x index")
+    plt.ylabel("k_y index")
+    plt.colorbar(label="|FFT|")
     plt.show()

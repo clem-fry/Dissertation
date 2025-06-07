@@ -128,6 +128,7 @@ def shape_nodes(shape_check, grid_size, initial_conditions):
                 all_nodes[node.x -1, node.y -1] = node
                 neighbours = np.array([(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)])
                 # if any of the neighbours are outside the circle
+                # this may send a coordinate outside of the domain - throwing errors sometimes if the function can't handle that
                 if np.any(~shape_check(r, neighbours)):
                         border_nodes.append(node) 
 
@@ -151,8 +152,11 @@ def shape_nodes(shape_check, grid_size, initial_conditions):
 #                 return new_values[coord_to_index[(rx, ry)]]
 #     return None  # no valid result
 
-def simulation(f, g, Du, Dv, grid_size=20, n = 10000, dt = 0.001, initial_conditions = np.random.rand(400, 2), shape = shapes.grid_check, show=True, save=False, save_path="simulation_final.png"):
+def simulation(f, g, Du, Dv, grid_size=20, n = 10000, dt = 0.001, initial_conditions = 'rand', shape = shapes.grid_check, show=True, save=False, save_path="simulation_final.png"):
     # creates all nodes
+    if isinstance(initial_conditions, str) and initial_conditions == 'rand':
+        initial_conditions = np.random.rand(grid_size*grid_size, 2)
+    
     all_nodes, border_nodes = shape_nodes(shape, grid_size, initial_conditions)
     if show:
         fig, axes = plt.subplots(3, 3, figsize=(8, 8))
