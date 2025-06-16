@@ -71,31 +71,32 @@ with open('valid_params_scored.txt', 'r') as file:
 # k = 1 -> 5 (1.5 across)
 # k = 1.5 -> 9 (3 across)
 # k = 2 -> 13 (3.5 across?)
+grid_size = 20
+kx = np.fft.fftfreq(grid_size, d=1)  # no 2π
+ky = np.fft.fftfreq(grid_size, d=1)
 
-dx = 1
-kx = 2 * np.pi * np.fft.fftfreq(grid_size, d=dx)
-ky = 2 * np.pi * np.fft.fftfreq(grid_size, d=dx)
 kx_grid, ky_grid = np.meshgrid(kx, ky, indexing='ij')
+k_squared = ((2 * np.sin(np.pi * kx_grid))**2 + (2 * np.sin(np.pi * ky_grid))**2).flatten()
+k_sqrt = np.sqrt(k_squared)
 
-k_magnitudes = np.sqrt(kx_grid**2 + ky_grid**2).flatten()
-k_unique = np.unique(np.round(k_magnitudes, decimals=6))  # to remove duplicate magnitudes
+k_unique = np.unique(np.round(np.sort(-k_sqrt), decimals=6))  # to remove duplicate magnitudes
 
-# k_unique = [0. , 0.314159, 0.444288, 0.628319, 0.702481, 0.888577,
-    #    0.942478, 0.993459, 1.132717, 1.256637, 1.295312, 1.332865,
-    #    1.404963, 1.570796, 1.601904, 1.691799, 1.777153, 1.831848,
-    #    1.884956, 1.910956, 1.986918, 2.011601, 2.107444, 2.199115,
-    #    2.221441, 2.265435, 2.287114, 2.392566, 2.453662, 2.513274,
-    #    2.532833, 2.590624, 2.66573 , 2.684178, 2.7025  , 2.809926,
-    #    2.827433, 2.844833, 2.896405, 2.963773, 2.980376, 3.09411 ,
-    #    3.110018, 3.141593, 3.157262, 3.203808, 3.234468, 3.279919,
-    #    3.339559, 3.383599, 3.398152, 3.512407, 3.554306, 3.581967,
-    #    3.663695, 3.782979, 3.834803, 3.998595, 4.023202, 4.226581,
-    #    4.442883]
+# k_unique = [2.828427, 2.81107 , 2.793604, 2.760079, 2.742289, 2.689994,
+#    2.678726, 2.660392, 2.606454, 2.572554, 2.553458, 2.520147,
+#    2.497212, 2.44949 , 2.429426, 2.406991, 2.370239, 2.319906,
+#    2.298712, 2.288246, 2.274988, 2.236068, 2.196458, 2.174061,
+#    2.148961, 2.134839, 2.107715, 2.093315, 2.069802, 2.024324,
+#    2.      , 1.975377, 1.927672, 1.902113, 1.886143, 1.855388,
+#    1.839012, 1.80927 , 1.782013, 1.732051, 1.680604, 1.662508,
+#    1.648005, 1.618034, 1.543362, 1.485394, 1.448408, 1.414214,
+#    1.328131, 1.284079, 1.216492, 1.175571, 1.09836 , 0.960373,
+#    0.907981, 0.874032, 0.692714, 0.618034, 0.442463, 0.312869,
+#    0.]
 #%%
 # peak/area with 1.404963 is good
 # k = 2.66  and 0.314159 rubbish regardless of scoring - wavelength too big
  # k between 0.0888577 ->
-k_val = 1.404963
+k_val = 1.414214
 num_selected = 20
 
 indices = [i for i, param in enumerate(valid_params) if param[10] > 0]
@@ -129,13 +130,13 @@ model = models.linear
 f, g = model(a, b, c, d, e, w)
 
 # initial not same u and v
-initial_conditions = np.column_stack((np.full(400, 0.2), np.full(400, 0.8)))
+#initial_conditions = np.column_stack((np.full(400, 0.2), np.full(400, 0.8)))
 
 initial_conditions = np.ones((400, 2)) /2
-initial_conditions = np.random.rand(400, 2)
+#initial_conditions = np.random.rand(400, 2)
 
 shape = shapes.grid_check
-n = 30000
+n = 5000
 show = True
 u, v = discrete_turning.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=show)
 #evaluation.turing_check(f, g, Du, Dv)

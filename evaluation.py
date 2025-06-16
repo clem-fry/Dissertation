@@ -26,13 +26,15 @@ def dispersion_relation_plot(f, g, Du, Dv, grid_size=20, plot=True, save=False, 
     #eigenvalues, J = models.local_stability(f, g, u0, v0)
     # k is the spatial frequency / wavenumber (how many cycles per unit length)
     #k_vals = np.linspace(0.0, 5.0, 400)
-    dx = 1
-    kx = 2 * np.pi * np.fft.fftfreq(grid_size, d=dx)
-    ky = 2 * np.pi * np.fft.fftfreq(grid_size, d=dx)
-    kx_grid, ky_grid = np.meshgrid(kx, ky, indexing='ij')
+    kx = np.fft.fftfreq(grid_size, d=1)  # no 2π
+    ky = np.fft.fftfreq(grid_size, d=1)
 
-    k_magnitudes = np.sqrt(kx_grid**2 + ky_grid**2).flatten()
-    k_unique = np.unique(np.round(k_magnitudes, decimals=6))  # to remove duplicate magnitudes
+    kx_grid, ky_grid = np.meshgrid(kx, ky, indexing='ij')
+    k_squared = ((2 * np.sin(np.pi * kx_grid))**2 + (2 * np.sin(np.pi * ky_grid))**2).flatten()
+    k_sqrt = np.sqrt(k_squared)
+
+    k_unique = np.unique(np.round(np.sort(k_sqrt), decimals=6))[::-1]  # to remove duplicate magnitudes
+    # to remove duplicate magnitudes
     real_parts = []
     prev_eigs = None
     branch_1 = []

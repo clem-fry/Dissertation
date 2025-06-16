@@ -8,12 +8,12 @@ from scipy.signal import find_peaks
 
 def find_params():
     param_ranges = {
-        'a': (-1, 1),
-        'b': (-1, 1),
-        'c': (-1, 1),  # c and d positive to keep reaction meaningful
-        'd': (-1, 1),
-        'e': (-1, 1),
-        'w': (-1, 1),
+        'a': (-100, 100),
+        'b': (-100, 100),
+        'c': (-100, 100),  # c and d positive to keep reaction meaningful
+        'd': (-100, 100),
+        'e': (-100, 100),
+        'w': (-100, 100),
         'Du': (0.1, 1),
         'Dv': (5, 15)
     }
@@ -21,7 +21,7 @@ def find_params():
     model = models.linear
     valid_params = evaluation.suggest_parameters(param_ranges, model, n_trials = 5000)
 
-    with open('valid_params_new.txt', 'w') as f:
+    with open('valid_params_big.txt', 'w') as f:
         for item in valid_params:
             f.write(str(item) + '\n')
 
