@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from scipy.optimize import root
 
 # %%
+
 def find_steady_state(f, g, initial_guess):
     def equations(vars):
         u, v = vars
