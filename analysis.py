@@ -36,9 +36,24 @@ with open('valid_params_scored.txt', 'r') as file:
         valid_params.append(tup)
 
 
+# functions for calculating quadratic of growth rate from laplacian eigenvalues
+
+def growth_rate(params, eigvals):
+    lambda_alpha = np.zeros_like(eigvals, dtype = complex)
+    a, b, c, d, e, w, Du, Dv = params
+    for i, eig in enumerate(eigvals): # calculating growth rate lambda
+        # growth rate and eigenvector are directly proportional
+        trace_J = a + e
+        det_J = a*e - b*d
+        B = -(trace_J + (Du+Dv)*eig)
+        C = Dv * Du * eig **2 + Du * (e + Dv/Du * a) * eig + det_J
+        #lambda_alpha[i] = 0.5 * (a + e + (1+Dv/Du)*Du*eig + np.sqrt(4*b*d + (a-e + (1-Dv/Du) * Du * eig)**2 + 0j))
+        lambda_alpha[i] = 0.5 * (-B + np.sqrt((B)**2 + 0j - 4*C))
+    return lambda_alpha
+
 def linear_stability(params, grid_size = 20):
     a, b, c, d, e, w, Du, Dv = params
-    c, w = 0, 0
+    #c, w = 0, 0
     model = models.linear
     f, g = model(a, b, c, d, e, w)
 
@@ -55,16 +70,7 @@ def linear_stability(params, grid_size = 20):
 
     eigvals, eigvecs = np.linalg.eigh(L)
 
-    # sort_idx = eigvals.argsort()[::-1] 
-    # eigvals = eigvals[sort_idx] 
-    # eigvecs = eigvecs[sort_idx] 
-
-    lambda_alpha = np.zeros_like(eigvals, dtype = complex)
-
-    for i, eig in enumerate(eigvals): # calculating growth rate lambda
-        # growth rate and eigenvector are directly proportional
-        lambda_alpha[i] = 0.5 * (a + e + (1+Dv/Du)*Du*eig + np.sqrt(4*b*d + (a-e + (1-Dv/Du) * Du * eig)**2 + 0j))
-
+    lambda_alpha = growth_rate(params, eigvals) 
     return eigvals, eigvecs, lambda_alpha
 
 params = valid_params[752][:8]
@@ -90,21 +96,24 @@ plt.title("Dispersion Relation")
 np.any(lambda_alpha.real > 0)
 np.sum(lambda_alpha.real > 0)
 # %%
-params = valid_params[0][:8]
+params = valid_params[404][:8]
 
 model = models.linear
 grid_size = 20
 a, b, c, d, e, w, Du, Dv = params
+f, g = model(a, b, c, d, e, w)
 
-# x_star = - epsilon eigenvalue_star <- critical value 
+def eigvalue_roots(params):
+    a, b, c, d, e, w, Du, Dv = params
+    det_J = a * e - b * d
+    A = Dv
+    B = e + a * Dv/Du
+    C = det_J / Du
 
-sigma = Dv/Du
+    root_pos = (-B + np.sqrt(B**2 - 4 * A * C))/(2*A)
+    root_neg = (-B - np.sqrt(B**2 - 4 * A * C))/(2*A)
+    return [root_pos, root_neg]
 
-x_star = ((a - e) * sigma - np.sqrt(b*d+0j)*(sigma + 1))/(Du * sigma * (sigma -1))
-
-eigenvalue_star = x_star / Du # where it should touch x axis
-
-#%%
 # 752 , 404, 847
 
 #c, w = 0, 0
@@ -113,22 +122,30 @@ Dv = Du * critical_ratio # sigma = Dv/Du
 
 critical_eigenvalue = ((a - e)*critical_ratio - np.sqrt(abs(b)*d*critical_ratio+0j)*(critical_ratio+1))/(Du * critical_ratio*(critical_ratio-1))
 
-params = valid_params[961][:8]
-a, b, c, d, e, w, Du, Dv = params
-f, g = model(a, b, c, d, e, w)
-
-
 eigvals, eigvecs, lambda_alpha = linear_stability(params)
 
 valid = eigvals < -0.000001
 
 log_eigval = np.log(-eigvals[valid])
 
+# where would it touch the x axis
+eigenvalue_roots = eigvalue_roots(params)
+
+# expansion of line to see trend
+x_axis = np.arange(int(eigenvalue_roots[1]), int(eigenvalue_roots[0]), 1)
+lambda_alpha_all = growth_rate(params, x_axis)
+
+
+
 # sort_idx = log_eigval.argsort()[::-1] 
 # log_eigval = log_eigval[sort_idx] 
 branch_1, branch_2, k_unique = evaluation.dispersion_relation_plot(f, g, Du, Dv, plot=False)
-plt.plot(-(k_unique**2), branch_1, 'o', label='From k (dispersion)', alpha=0.7)
+
+
+plt.plot(eigenvalue_roots, [0, 0], 'r*')
+#plt.plot(-(k_unique**2), branch_1, 'o', label='From k (dispersion)', alpha=0.7)
 plt.plot(eigvals[valid], lambda_alpha.real[valid], 'o')
+plt.plot(x_axis, lambda_alpha_all.real, 'k--')
 plt.axhline(0, color='gray', linestyle='--')
 plt.xlabel("Laplacian eigenvalue Λ")
 plt.ylabel("Growth rate Re(λ)")
@@ -157,6 +174,7 @@ B_critical = (-a + e + (critical_ratio -1)*Du * critical_eigenvalue + np.sqrt(4*
 # the roots of c(eigval_alpha) where a growth rate**2 + b growth rate + c = 0
 
 # turing instability -> some of the eigenvalues are in this range
+sigma = Dv/Du
 root1 = -(e + a * sigma) + np.sqrt((e + sigma * a)**2 - 4 * sigma * (a*e-b*d))/2*sigma*Du
 root2 = -(e + a * sigma) - np.sqrt((e + sigma * a)**2 - 4 * sigma * (a*e-b*d))/2*sigma*Du
 

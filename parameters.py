@@ -8,20 +8,20 @@ from scipy.signal import find_peaks
 
 def find_params():
     param_ranges = {
-        'a': (-100, 100),
-        'b': (-100, 100),
-        'c': (-100, 100),  # c and d positive to keep reaction meaningful
-        'd': (-100, 100),
-        'e': (-100, 100),
-        'w': (-100, 100),
-        'Du': (0.1, 1),
-        'Dv': (5, 15)
+        'a': (-20, 20),
+        'b': (-20, 20),
+        'c': (-20, 20),  # c and d positive to keep reaction meaningful
+        'd': (-20, 20),
+        'e': (-20, 20),
+        'w':(-20, 20),
+        'Du': (0.1, 1), # POSITIVE
+        'Dv': (5, 15) # POSTIVE
     }
 
     model = models.linear
     valid_params = evaluation.suggest_parameters(param_ranges, model, n_trials = 5000)
 
-    with open('valid_params_big.txt', 'w') as f:
+    with open('valid_params_19june.txt', 'w') as f:
         for item in valid_params:
             f.write(str(item) + '\n')
 
@@ -58,7 +58,7 @@ def plot_dispersion_turing(valid_params, indicies, initial_conditions=None, grid
         else:
             u, v = discrete_turning.simulation(f, g, Du, Dv, n = 30000, initial_conditions = initial_conditions, grid_size=grid_size, show=False, save=True, save_path=f"plots/simulation_plot_{i}.png")
         
-        print(evaluation.turing_check(f, g, Du, Dv))
+        print(evaluation.turing_check(valid_params[i][0:8]))
         _ = evaluation.dispersion_relation_plot(f, g, Du, Dv, plot=False, save=True, save_path=f"plots/dispersion_plot_{i}.png")
 
     fig, axes = plt.subplots(5, 2, figsize=(12, 20))

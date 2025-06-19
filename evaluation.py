@@ -101,7 +101,8 @@ def suggest_parameters(param_ranges, model, n_trials=1000):
         Dv = round(np.random.uniform(*param_ranges['Dv']), 3)
 
         f, g = model(a, b, c, d, e, w)
-        if np.all(turing_check(f, g, Du, Dv)):
+        parmas = a, b, c, d, e, w, Du, Dv
+        if np.all(turing_check(parmas)):
             branch1, branch2, k_vals = dispersion_relation_plot(f, g, Du, Dv, plot=False)
             peak1, _ = find_peaks(branch1)
             peak2, _ = find_peaks(branch2)
@@ -138,28 +139,45 @@ def suggest_parameters(param_ranges, model, n_trials=1000):
 
 #%%
 
-def turing_check(f, g, Du, Dv, verbose=False):
+def turing_check(params, verbose=False):
+    a, b, c, d, e, w, Du, Dv = params
     nonspacial_stability = False # we want both of these to be true
     spacial_instability = False
-    try:
-        u0, v0 = find_steady_state(f, g, initial_guess=(1.0, 0.0))
-    except:
-        if verbose:
-            print('non-spacial system is unstable - not turing instability')
-        return False, False # undefined steady state
+    # try:
+    #     u0, v0 = find_steady_state(f, g, initial_guess=(1.0, 0.0))
+    # except:
+    #     if verbose:
+    #         print('non-spacial system is unstable - not turing instability')
+    #     return False, False # undefined steady state
 
-    if np.all(models.nonspacial_eigenvalues(f, g) > 0): # nonspacial stability
+    # eigenvalues of nonspacial stability - should be positive and not satisfy
+    # must satisfy a + e > 0 and ae - bd > 0
+    # !! just changed to negative
+    # this ensure that the tr(A) = a + e < 0
+    # det(A) = a*e - b*d > 0
+    # if np.all(models.nonspacial_eigenvalues(f, g) < 0): # nonspacial stability
+    #     nonspacial_stability = True
+
+    det_J = a * e - b * d > 0
+    tr_J = a + d < 0
+
+    if det_J and tr_J:
         nonspacial_stability = True
 
     # spacial instability - real part of leading eigenvalue is positive
-    lamda0 = max(models.dispersion(f, g, u0, v0, Du, Dv, 0)[0])
-    if lamda0 > 0:
-        spacial_instability = True
-        if verbose:
-            print('spacial system is unstable - turing instability')
-    else:
-        if verbose:
-            print('spacial system is stable - not turing instability')
+    # Du * e + Du * a > 2 * sqrt(Du Dv ( a * e - b * d)) https://genecompute.medium.com/deriving-the-conditions-for-turing-patterns-3496b7fa1e1a
+    # we want some growth rate > 0
+
+    #lamda0 = max(models.dispersion(f, g, u0, v0, Du, Dv, 0)[0])
+
+    spacial_instability = -(Dv * a + Du * e)**2 + 4 * Du * Dv * det_J < 0
+    # if lamda0 > 0:
+    #     spacial_instability = True
+    #     if verbose:
+    #         print('spacial system is unstable - turing instability')
+    # else:
+    #     if verbose:
+    #         print('spacial system is stable - not turing instability')
 
     return nonspacial_stability, spacial_instability
 
