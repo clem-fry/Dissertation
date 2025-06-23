@@ -50,3 +50,15 @@ def heart_outline_check(r, coords):
 
     # is the node in the circle?
     return ((x_scaled**2 + y_scaled**2 - 1)**3 - x_scaled**2 * y_scaled**3) <= 0
+
+
+def triangle_outline_check(r, coords):
+    coords = np.atleast_2d(coords)
+    x = coords[:, 0] -1
+    y = coords[:, 1] -1
+
+    # Conditions:
+    # - inside vertical side: 0 ≤ y ≤ r
+    # - inside horizontal side: 0 ≤ x ≤ r
+    # - below or on hypotenuse: x + y ≤ r
+    return (x >= 0) & (y >= 0) & (x <= r) & (y <= r) & (x + y <= r)

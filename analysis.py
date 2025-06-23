@@ -3,7 +3,7 @@ import ast
 import re
 import discrete_turning
 import models
-import evaluation
+import plots
 import numpy as np
 import matplotlib.pyplot as plt
 import importlib
@@ -14,7 +14,7 @@ import shapes
 
 importlib.reload(discrete_turning)
 importlib.reload(models)
-importlib.reload(evaluation)
+importlib.reload(plots)
 importlib.reload(shapes)
 importlib.reload(parameters)
 
@@ -48,16 +48,17 @@ def growth_rate(params, eigvals):
         B = -(trace_J + (Du+Dv)*eig)
         C = Dv * Du * eig **2 + Du * (e + Dv/Du * a) * eig + det_J
         #lambda_alpha[i] = 0.5 * (a + e + (1+Dv/Du)*Du*eig + np.sqrt(4*b*d + (a-e + (1-Dv/Du) * Du * eig)**2 + 0j))
-        lambda_alpha[i] = 0.5 * (-B + np.sqrt((B)**2 + 0j - 4*C))
+        discriminant = B**2 - 4*C
+        discriminant = np.real_if_close(discriminant, tol=1e-10)
+
+        lambda_alpha[i] = 0.5 * (-B + np.sqrt(discriminant + 0j))
     return lambda_alpha
 
-def linear_stability(params, grid_size = 20):
+def linear_stability(params, grid_size = 20, shape = shapes.grid_check, model = models.linear):
     a, b, c, d, e, w, Du, Dv = params
     #c, w = 0, 0
-    model = models.linear
     f, g = model(a, b, c, d, e, w)
 
-    shape = shapes.grid_check
     initial_conditions = np.ones((grid_size ** 2, 2)) /2
 
     all_nodes, border_nodes = discrete_turning.shape_nodes(shape, grid_size, initial_conditions)
@@ -139,7 +140,7 @@ lambda_alpha_all = growth_rate(params, x_axis)
 
 # sort_idx = log_eigval.argsort()[::-1] 
 # log_eigval = log_eigval[sort_idx] 
-branch_1, branch_2, k_unique = evaluation.dispersion_relation_plot(f, g, Du, Dv, plot=False)
+branch_1, branch_2, k_unique = plots.dispersion_relation_plot(f, g, Du, Dv, plot=False)
 
 
 plt.plot(eigenvalue_roots, [0, 0], 'r*')
@@ -182,7 +183,7 @@ root2 = -(e + a * sigma) - np.sqrt((e + sigma * a)**2 - 4 * sigma * (a*e-b*d))/2
 
 #%% Comparison of growth rate found from laplacian and found from fourier
 
-branch_1, branch_2, k_unique = evaluation.dispersion_relation_plot(f, g, Du, Dv)
+branch_1, branch_2, k_unique = plots.dispersion_relation_plot(f, g, Du, Dv)
 
 plt.figure(figsize=(7, 5))
 plt.plot(-(k_unique**2), branch_1, 'o', label='From k (dispersion)', alpha=0.7)

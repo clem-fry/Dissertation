@@ -1,5 +1,5 @@
 import models
-import evaluation
+import plots
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 import discrete_turning
@@ -19,103 +19,129 @@ def find_params():
     }
 
     model = models.linear
-    valid_params = evaluation.suggest_parameters(param_ranges, model, n_trials = 5000)
+    valid_params = suggest_parameters(param_ranges, model, n_trials = 5000)
 
     with open('valid_params_19june.txt', 'w') as f:
         for item in valid_params:
             f.write(str(item) + '\n')
 
-def score_params(valid_params):
-    scored_params = []
+def suggest_parameters(param_ranges, model, n_trials=1000):
+    # Set ranges for parameters
 
-    for p, param in enumerate(valid_params):
-        a, b, c, d, e, w, Du, Dv, peak, peak_lambda, peak_k, band_width, area = param
+    valid_params = []
 
-        if not peak:
-            continue  # skip if no dispersion peak
+    for n in range(n_trials):
+        if n % 100 == 0:
+            print(n)
+        # peak = False
+        a = round(np.random.uniform(*param_ranges['a']), 3)
+        b = round(np.random.uniform(*param_ranges['b']), 3)
+        e = round(np.random.uniform(*param_ranges['e']), 3)
+        d = round(np.random.uniform(*param_ranges['d']), 3)
+        c = round(np.random.uniform(*param_ranges['c']), 3)
+        w = round(np.random.uniform(*param_ranges['w']), 3)
+        Du = round(np.random.uniform(*param_ranges['Du']), 3)
+        Dv = round(np.random.uniform(*param_ranges['Dv']), 3)
 
-        # Compute score
-        score = peak_lambda * band_width * area
-        #score = criteria
-        # Append as (score, full_param_tuple)
-        scored_params.append((score, p, param))
+        f, g = model(a, b, c, d, e, w)
+        params = a, b, c, d, e, w, Du, Dv
+        if np.all(turing_check(params)):
+            eigvals, eigvecs, lambda_alpha = analysis.linear_stability(params)
 
-    # Sort by score descending (best patterns first)
-    scored_params.sort(reverse=True, key=lambda x: x[0])
+            smoothed = gaussian_filter1d(lambda_alpha, sigma=2)
+            all_peaks, _ = find_peaks(smoothed)
 
-    # Print top 5
-    for score, p, param in scored_params[:5]:
-        print(f"Score: {score:.4f}, Index: {p} Parameters: {param}")
+            if len(all_peaks) == 0:
+                peak_k = 0
+                peak_lamda = 0
+                
+            else:
+                peak = all_peaks[0]
+                peak_lamda = lambda_alpha[peak]
+                peak_k = eigvals[peak]
 
-    return scored_params
+            unstable_indices = np.where(lambda_alpha > 0)[0]
+            if len(unstable_indices) > 0:
+                k_min = eigvals[unstable_indices[0]]
+                k_max = eigvals[unstable_indices[-1]]
+                unstable_band_width = k_max - k_min
+                area = np.trapz(lambda_alpha[unstable_indices], eigvals[unstable_indices])
+            else:
+                unstable_band_width = 0
+                area = 0
 
-def plot_dispersion_turing(valid_params, indicies, initial_conditions=None, grid_size = 20):
-    for i in indicies:
-        a, b, c, d, e, w, Du, Dv = valid_params[i][0:8]
-        f, g = models.linear(a, b, c, d, e, w)
-        if np.any(initial_conditions == None):
-            u, v = discrete_turning.simulation(f, g, Du, Dv, n = 30000, show=False, save=True, grid_size=grid_size, save_path=f"plots/simulation_plot_{i}.png")
-        else:
-            u, v = discrete_turning.simulation(f, g, Du, Dv, n = 30000, initial_conditions = initial_conditions, grid_size=grid_size, show=False, save=True, save_path=f"plots/simulation_plot_{i}.png")
-        
-        print(evaluation.turing_check(valid_params[i][0:8]))
-        _ = evaluation.dispersion_relation_plot(f, g, Du, Dv, plot=False, save=True, save_path=f"plots/dispersion_plot_{i}.png")
+            peak_width = peak_lamda / unstable_band_width if unstable_band_width > 0 else 0
+            peak_area = peak_lamda / area if area > 0 else 0
+            # if len(peaks) != 0:
+            #     peak = True
 
-    fig, axes = plt.subplots(5, 2, figsize=(12, 20))
+            valid_params.append((a, b, c, d, e, w, Du, Dv, peak_width, peak_lamda, peak_k, unstable_band_width, area, peak_area))
 
-    for idx, i in enumerate(indicies):
-        sim_img = mpimg.imread(f"plots/simulation_plot_{i}.png")
-        disp_img = mpimg.imread(f"plots/dispersion_plot_{i}.png")
-        
-        axes[idx, 0].imshow(sim_img)
-        axes[idx, 0].axis('off')
-        axes[idx, 0].set_title(f'Simulation {i}')
-        
-        axes[idx, 1].imshow(disp_img)
-        axes[idx, 1].axis('off')
-        axes[idx, 1].set_title(f'Dispersion Relation {i}')
+    print(f"Found {len(valid_params)} parameter sets with positive steady states out of {n_trials} trials.")
+    for params in valid_params[:10]:  # print first 10 valid sets
+        print(f"{params[0]:.3f}, {params[1]:.3f}, {params[2]:.3f}, {params[3]:.3f}, {params[4]:.3f}, {params[5]:.3f}, {params[6]:.3f}, {params[7]:.3f}")
 
-    plt.tight_layout()
-    plt.show()
+    return valid_params
 
-def loss_function(params):
+# Run to get suggestions
+#suggest_parameters()
+
+#%%
+
+def turing_check(params, verbose=False):
     a, b, c, d, e, w, Du, Dv = params
-    f, g = models.linear(a, b, c, d, e, w)
-    if not np.any(evaluation.turing_check(f, g, Du, Dv)):
-        return 10e10
-    
-    real_parts, k_vals = evaluation.dispersion_relation_plot(f, g, Du, Dv, plot=False)
-    peak1, _ = find_peaks(real_parts[:, 0])
-    peak2, _ = find_peaks(real_parts[:, 1])
-    peaks = np.append(peak1, peak2)
-    if len(peaks) == 0:
-        return 10e10
-    
+    nonspacial_stability = False # we want both of these to be true
+    spacial_instability = False
+    # try:
+    #     u0, v0 = find_steady_state(f, g, initial_guess=(1.0, 0.0))
+    # except:
+    #     if verbose:
+    #         print('non-spacial system is unstable - not turing instability')
+    #     return False, False # undefined steady state
+
+    # eigenvalues of nonspacial stability - should be positive and not satisfy
+    # must satisfy a + e > 0 and ae - bd > 0
+    # !! just changed to negative
+    # this ensure that the tr(A) = a + e < 0
+    # det(A) = a*e - b*d > 0
+    # if np.all(models.nonspacial_eigenvalues(f, g) < 0): # nonspacial stability
+    #     nonspacial_stability = True
+
+    det_J = a * e - b * d > 0
+    tr_J = a + d < 0
+
+    if det_J and tr_J:
+        nonspacial_stability = True
+
+    # spacial instability - real part of leading eigenvalue is positive
+    # Du * e + Du * a > 2 * sqrt(Du Dv ( a * e - b * d)) https://genecompute.medium.com/deriving-the-conditions-for-turing-patterns-3496b7fa1e1a
+    # we want some growth rate > 0
+
+    #lamda0 = max(models.dispersion(f, g, u0, v0, Du, Dv, 0)[0])
+
+    #spacial_instability = -(Dv * a + Du * e)**2 + 4 * Du * Dv * det_J < 0
+    eigvals, eigvecs, lambda_alpha = analysis.linear_stability(params)
+    if np.any(lambda_alpha > 0):
+        spacial_instability = True
+    # if lamda0 > 0:
+    #     spacial_instability = True
+    #     if verbose:
+    #         print('spacial system is unstable - turing instability')
+    # else:
+    #     if verbose:
+    #         print('spacial system is stable - not turing instability')
+
+    return nonspacial_stability, spacial_instability
+
+
+def find_steady_state(f, g, initial_guess):
+    def equations(vars):
+        u, v = vars
+        return [f(u, v), g(u, v)]
+
+    sol = root(equations, initial_guess, method='hybr')
+    if sol.success:
+        return sol.x
     else:
-        return -np.max(peaks)
+        raise RuntimeError("Failed to find steady state")
     
-def check_for_instability(f, g, Du, Dv):
-    if np.all(evaluation.turing_check(f, g, Du, Dv)):
-        real_parts, k_vals = evaluation.dispersion_relation_plot(f, g, Du, Dv, plot=False)
-        peak1, _ = find_peaks(real_parts[:, 0])
-        peak2, _ = find_peaks(real_parts[:, 1])
-
-        turing_flag = (
-            (len(peak1) > 0 and np.any(real_parts[peak1, 0] > 0)) or
-            (len(peak2) > 0 and np.any(real_parts[peak2, 1] > 0))
-        )
-
-        if turing_flag:
-            print("Turing-like instability detected")
-            print(a, b, c, d, e, w)
-            _ = evaluation.dispersion_relation_plot(f, g, Du, Dv, plot=True)
-            u, v = discrete_turning.simulation(f, g, Du, Dv, n=n, show=True)
-                #break
-
-        else:
-            _ = evaluation.dispersion_relation_plot(f, g, Du, Dv, plot=True)
-            #u, v = discrete_turning.simulation(f, g, Du, Dv, n=n, show=True)
-            print('no peak')
-
-    else:
-        print('Not locally unstable')

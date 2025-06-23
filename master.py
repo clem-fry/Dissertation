@@ -1,7 +1,7 @@
 #%%
 import discrete_turning
 import models
-import evaluation
+import plots
 import numpy as np
 import matplotlib.pyplot as plt
 import importlib
@@ -10,7 +10,7 @@ import shapes
 #%%
 importlib.reload(discrete_turning)
 importlib.reload(models)
-importlib.reload(evaluation)
+importlib.reload(plots)
 importlib.reload(shapes)
 importlib.reload(parameters)
 
@@ -35,7 +35,8 @@ n = int(T/dt) # number of iterations
 Du, Dv = 0.5, 10
 
 u, v = discrete_turning.simulation(f, g, Du, Dv, n=n, dt=dt, show=True)
-evaluation.turing_check(f, g, Du, Dv)
+params = a, b, c, d, e, w, Du, Dv
+plots.turing_check(params)
 
 # if Re(lamda(0)) > 0 the system is unstable without diffusion (bad)
 # if Re(lamda(k)) > 0 for some nonzero k, the system is unstable and can form a pattern
@@ -49,7 +50,7 @@ import ast
 import re
 
 valid_params = []
-with open('valid_params_scored.txt', 'r') as file:
+with open('valid_params_19june.txt', 'r') as file:
     for line in file:
         line = line.strip()
         # Remove trailing dot if present (optional)
@@ -57,7 +58,7 @@ with open('valid_params_scored.txt', 'r') as file:
             line = line[:-1]
 
         # Replace np.float64(xxx) with xxx using regex
-        clean_line = re.sub(r'np\.float64\(([^)]+)\)', r'\1', line)
+        clean_line = re.sub(r'np\.(?:float64|complex128)\(([^)]+)\)', r'\1', line)
         
         # Safely parse the tuple string to a tuple
         tup = ast.literal_eval(clean_line)
@@ -81,41 +82,48 @@ k_sqrt = np.sqrt(k_squared)
 
 k_unique = np.unique(np.round(np.sort(-k_sqrt), decimals=6))  # to remove duplicate magnitudes
 
-# k_unique = [2.828427, 2.81107 , 2.793604, 2.760079, 2.742289, 2.689994,
-#    2.678726, 2.660392, 2.606454, 2.572554, 2.553458, 2.520147,
-#    2.497212, 2.44949 , 2.429426, 2.406991, 2.370239, 2.319906,
-#    2.298712, 2.288246, 2.274988, 2.236068, 2.196458, 2.174061,
-#    2.148961, 2.134839, 2.107715, 2.093315, 2.069802, 2.024324,
-#    2.      , 1.975377, 1.927672, 1.902113, 1.886143, 1.855388,
-#    1.839012, 1.80927 , 1.782013, 1.732051, 1.680604, 1.662508,
-#    1.648005, 1.618034, 1.543362, 1.485394, 1.448408, 1.414214,
-#    1.328131, 1.284079, 1.216492, 1.175571, 1.09836 , 0.960373,
-#    0.907981, 0.874032, 0.692714, 0.618034, 0.442463, 0.312869,
-#    0.]
+# k_unique = [2.828427, 2.81107 , 2.793604, 2.760079, 2.742289, 2.689994, 2.678726, 2.660392, 2.606454, 2.572554, 2.553458, 2.520147, 2.497212, 2.44949 , 2.429426, 2.406991, 2.370239, 2.319906, 2.298712, 2.288246, 2.274988, 2.236068, 2.196458, 2.174061, 2.148961, 2.134839, 2.107715, 2.093315, 2.069802, 2.024324, 2.      , 1.975377, 1.927672, 1.902113, 1.886143, 1.855388, 1.839012, 1.80927 , 1.782013, 1.732051, 1.680604, 1.662508, 1.648005, 1.618034, 1.543362, 1.485394, 1.448408, 1.414214, 1.328131, 1.284079, 1.216492, 1.175571, 1.09836 , 0.960373, 0.907981, 0.874032, 0.692714, 0.618034, 0.442463, 0.312869, 0.]
 #%%
 # peak/area with 1.404963 is good
 # k = 2.66  and 0.314159 rubbish regardless of scoring - wavelength too big
  # k between 0.0888577 ->
-k_val = 1.414214
+ 
+
+eigevalue_wavesize = -0.3
 num_selected = 20
 
-indices = [i for i, param in enumerate(valid_params) if param[10] > 0]
+#indices = [i for i, param in enumerate(valid_params)]
+
+# filter where the peak is positive
+filtered_growth = [(i, param) for i, param in enumerate(valid_params) if np.real(param[9]) > 0]
 
 # find the k value at peak and the peak/width score
-peak_ks_positive = np.array([valid_params[i][10] for i in indices])
+# must be positive lambda growth
+peak_growth = np.array([param[10] for _, param in filtered_growth])
+
 # param[8] = peak/width (prioritise crispness); param[-1] = peak/area (robust?) prefer this?
-scores = np.array([valid_params[i][-1] for i in indices]) 
+scores = np.array([param[-1] for _, param in filtered_growth])
 
-differences = np.abs(peak_ks_positive - k_val)
+indices = [i for i, _ in filtered_growth]
 
-# combine these and sort - then pick out these indicies
-composite_scores = (1 / (1 + differences) ** 2) * scores
-sorted_indices = np.argsort(-composite_scores)
-closest_indices = np.array(indices)[sorted_indices[:num_selected]]
+# this might be smaller if limiting by positive growth
+differences = np.abs(np.abs(peak_growth) - np.abs(eigevalue_wavesize))
 
+ranked_indices = np.argsort(differences)[:num_selected]
+closest_indices = [indices[i] for i in ranked_indices]
+
+
+# # combine these and sort - then pick out these indicies
+# composite_scores = (1 / (1 + differences) ** 2) * scores
+# sorted_indices = np.argsort(-composite_scores)
+# closest_indices = np.array(indices)[sorted_indices[:num_selected]]
+
+# closest_indices = np.array(indices)[np.argsort(differences)[:num_selected]]
 #%% PLOT PATTERN AND DISPERSION FOR DIFFERENT PARAMETERS
 
 # n = 10000
+
+# flicking behaviour when dominant root changes sign??
 
 initial_conditions = np.ones((400, 2)) /2
 #initial_conditions = np.random.rand(400, 2)
@@ -124,7 +132,7 @@ parameters.plot_dispersion_turing(valid_params, closest_indices[:5], initial_con
 
 #%% SPECIFIC REPEAT?
 grid_size = 20
-params = valid_params[1181][:8]
+params = valid_params[300][:8]
 a, b, c, d, e, w, Du, Dv = params
 model = models.linear
 f, g = model(a, b, c, d, e, w)
@@ -136,14 +144,14 @@ initial_conditions = np.ones((400, 2)) /2
 #initial_conditions = np.random.rand(400, 2)
 
 shape = shapes.grid_check
-n = 5000
+n = 50000
 show = True
 u, v = discrete_turning.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=show)
-#evaluation.turing_check(f, g, Du, Dv)
+#plots.turing_check(f, g, Du, Dv)
 #%%
-evaluation.dispersion_plot(params, model, grid_size)
+plots.dispersion_plot(params, model, grid_size)
 
-evaluation.fourier_spectrum_plot(u)
+plots.fourier_spectrum_plot(u)
 
 #%% scoring for robustness and sharpness with fourier spectrum
 
@@ -279,7 +287,7 @@ a, b, c, d, e, w, Du, Dv = valid_params[278][:8]
 f, g = models.linear(a, b, c, d, e, w)
 
 parameters.check_for_instability(f, g, Du, Dv)
-# evaluation.dispersion_relation_plot(f, g, Du, Dv)
+# plots.dispersion_relation_plot(f, g, Du, Dv)
 # %%
 
 # %% PLOT RELATION BETWEEN PARAMETERS
