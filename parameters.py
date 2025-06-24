@@ -2,9 +2,14 @@ import models
 import plots
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
-import discrete_turning
+import simulation
+import analysis
 import numpy as np
+from scipy.optimize import root
 from scipy.signal import find_peaks
+from scipy.ndimage import gaussian_filter1d
+import sympy as sp
+
 
 def find_params():
     param_ranges = {
@@ -21,7 +26,7 @@ def find_params():
     model = models.linear
     valid_params = suggest_parameters(param_ranges, model, n_trials = 5000)
 
-    with open('valid_params_19june.txt', 'w') as f:
+    with open('valid_params_23june.txt', 'w') as f:
         for item in valid_params:
             f.write(str(item) + '\n')
 
@@ -45,7 +50,7 @@ def suggest_parameters(param_ranges, model, n_trials=1000):
 
         f, g = model(a, b, c, d, e, w)
         params = a, b, c, d, e, w, Du, Dv
-        if np.all(turing_check(params)):
+        if np.all(turing_check(f, g, Du, Dv)):
             eigvals, eigvecs, lambda_alpha = analysis.linear_stability(params)
 
             smoothed = gaussian_filter1d(lambda_alpha, sigma=2)
@@ -86,18 +91,42 @@ def suggest_parameters(param_ranges, model, n_trials=1000):
 # Run to get suggestions
 #suggest_parameters()
 
+def spacial_instabilitiy(f, g, u0, v0, Du, Dv):
+        J_sub = non_spacial_stability(f, g, u0, v0)
+        determinant = np.linalg.det(J_sub)
+
+        condition =( Du ** 2 * (J_sub[1, 1]+Dv/Du * J_sub[0, 0] ) ** 2 - 4*Dv * Du * determinant)
+        return condition
+
+def non_spacial_stability(f, g, u0, v0):
+        u = sp.symbols('u')
+        v = sp.symbols('v')
+
+        F = f(u, v)
+        G = g(u, v)
+
+        J = sp.Matrix([
+        [sp.diff(F, u), sp.diff(F, v)],
+        [sp.diff(G, u), sp.diff(G, v)]
+        ])
+
+        J_sub = J.subs({u: u0, v: v0}).evalf()  # Evaluate to floats
+        J_sub = np.array(J_sub).astype(np.float64)  # Convert to NumPy array
+
+        return J_sub
+
 #%%
 
-def turing_check(params, verbose=False):
-    a, b, c, d, e, w, Du, Dv = params
+def turing_check(f, g, Du, Dv, verbose=False):
+    #a, b, c, d, e, w, Du, Dv = params
     nonspacial_stability = False # we want both of these to be true
     spacial_instability = False
-    # try:
-    #     u0, v0 = find_steady_state(f, g, initial_guess=(1.0, 0.0))
-    # except:
-    #     if verbose:
-    #         print('non-spacial system is unstable - not turing instability')
-    #     return False, False # undefined steady state
+    try:
+        u0, v0 = find_steady_state(f, g, initial_guess=(1.0, 0.0))
+    except:
+        if verbose:
+            print('non-spacial system is unstable - not turing instability')
+        return False, False # undefined steady state
 
     # eigenvalues of nonspacial stability - should be positive and not satisfy
     # must satisfy a + e > 0 and ae - bd > 0
@@ -106,12 +135,11 @@ def turing_check(params, verbose=False):
     # det(A) = a*e - b*d > 0
     # if np.all(models.nonspacial_eigenvalues(f, g) < 0): # nonspacial stability
     #     nonspacial_stability = True
-
-    det_J = a * e - b * d > 0
-    tr_J = a + d < 0
-
-    if det_J and tr_J:
-        nonspacial_stability = True
+    
+    J_sub = non_spacial_stability(f, g, u0, v0)
+    trace = np.trace(J_sub) < 0
+    determinant = np.linalg.det(J_sub) > 0
+    non_spacial_condition = np.all((trace, determinant))
 
     # spacial instability - real part of leading eigenvalue is positive
     # Du * e + Du * a > 2 * sqrt(Du Dv ( a * e - b * d)) https://genecompute.medium.com/deriving-the-conditions-for-turing-patterns-3496b7fa1e1a
@@ -120,9 +148,8 @@ def turing_check(params, verbose=False):
     #lamda0 = max(models.dispersion(f, g, u0, v0, Du, Dv, 0)[0])
 
     #spacial_instability = -(Dv * a + Du * e)**2 + 4 * Du * Dv * det_J < 0
-    eigvals, eigvecs, lambda_alpha = analysis.linear_stability(params)
-    if np.any(lambda_alpha > 0):
-        spacial_instability = True
+    
+    spacial_condition = spacial_instabilitiy(f, g, u0, v0, Du, Dv) > 0
     # if lamda0 > 0:
     #     spacial_instability = True
     #     if verbose:
@@ -131,7 +158,7 @@ def turing_check(params, verbose=False):
     #     if verbose:
     #         print('spacial system is stable - not turing instability')
 
-    return nonspacial_stability, spacial_instability
+    return non_spacial_condition, spacial_condition
 
 
 def find_steady_state(f, g, initial_guess):

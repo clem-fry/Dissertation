@@ -1,12 +1,9 @@
 #%%
-import discrete_turning
+import simulation
 import models
 import analysis
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.optimize import root
-from scipy.signal import find_peaks
-from scipy.ndimage import gaussian_filter1d
 import shapes
 
 # %%
@@ -37,12 +34,12 @@ def plot_dispersion_turing(valid_params, indicies, initial_conditions=None, grid
         a, b, c, d, e, w, Du, Dv = valid_params[i][0:8]
         f, g = models.linear(a, b, c, d, e, w)
         if np.any(initial_conditions == None):
-            u, v = discrete_turning.simulation(f, g, Du, Dv, n = 30000, show=False, save=True, grid_size=grid_size, save_path=f"plots/simulation_plot_{i}.png")
+            u, v, _ = simulation.simulation(f, g, Du, Dv, n = 30000, show=False, save=True, grid_size=grid_size, save_path=f"plots/simulation_plot_{i}.png")
         else:
-            u, v = discrete_turning.simulation(f, g, Du, Dv, n = 30000, initial_conditions = initial_conditions, grid_size=grid_size, show=False, save=True, save_path=f"plots/simulation_plot_{i}.png")
+            u, v, _ = simulation.simulation(f, g, Du, Dv, n = 30000, initial_conditions = initial_conditions, grid_size=grid_size, show=False, save=True, save_path=f"plots/simulation_plot_{i}.png")
         
-        print(evaluation.turing_check(valid_params[i][0:8]))
-        _ = evaluation.dispersion_relation_plot(valid_params[i][0:8], plot=False, save=True, save_path=f"plots/dispersion_plot_{i}.png")
+        print(analysis.turing_check(valid_params[i][0:8]))
+        _ = dispersion_relation_plot(valid_params[i][0:8], plot=False, save=True, save_path=f"plots/dispersion_plot_{i}.png")
 
     fig, axes = plt.subplots(5, 2, figsize=(12, 20))
 
@@ -76,7 +73,7 @@ def bifurcation(a_vals, b_vals, model, Du, Dv):
         print(i)
         for j, B in enumerate(b_vals):
             f, g = model(A, B)
-            u, v = discrete_turning.simulation(f, g, Du, Dv, n=3000, show=False)
+            u, v, _ = simulation.simulation(f, g, Du, Dv, n=3000, show=False)
             pattern_strengths[j, i] = measure_pattern_strength(v)
 
     # Plot bifurcation heatmap

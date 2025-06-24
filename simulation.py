@@ -168,6 +168,9 @@ def simulation(f, g, Du, Dv, grid_size=20, n = 10000, dt = 0.001, initial_condit
     adjacency_matrix = compute_adjacency_matrix(valid_nodes)
     degree_matrix = compute_degree_matrix(adjacency_matrix)
 
+    u_log = np.zeros((len(valid_nodes), n))
+    v_log = np.zeros((len(valid_nodes), n))
+
     for i in range(n):
         if i % 1000 == 0 and show:
             print(i)
@@ -202,6 +205,9 @@ def simulation(f, g, Du, Dv, grid_size=20, n = 10000, dt = 0.001, initial_condit
             scatter = plot_nodes(valid_nodes, ax=ax, i=i)
             #easy_plot(valid_nodes)
 
+        u_log[:, i] = u_vector
+        v_log[:, i] = v_vector
+
     if save:
         # Create a single figure and axis for final plot
         fig, ax = plt.subplots(figsize=(6, 6))
@@ -218,7 +224,7 @@ def simulation(f, g, Du, Dv, grid_size=20, n = 10000, dt = 0.001, initial_condit
     u_vector = np.array([float(node.u) for node in valid_nodes])
     v_vector = np.array([float(node.v) for node in valid_nodes])
 
-    return u_vector, v_vector
+    return u_vector, v_vector, (u_log, v_log)
 
 #simulation(n, f, g)
 # %%

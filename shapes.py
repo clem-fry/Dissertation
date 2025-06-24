@@ -62,3 +62,23 @@ def triangle_outline_check(r, coords):
     # - inside horizontal side: 0 ≤ x ≤ r
     # - below or on hypotenuse: x + y ≤ r
     return (x >= 0) & (y >= 0) & (x <= r) & (y <= r) & (x + y <= r)
+
+def line_check(r, coords):
+    coords = np.atleast_2d(coords)
+    x = coords[:, 0]
+    y = coords[:, 1]
+    return (y == 1)
+
+def point_number(r, coords):
+    coords = np.atleast_2d(coords)
+
+    r = int(r**2)
+    # Generate r integer grid points laid out in a compact grid (e.g., row-first)
+    rows = int(np.floor(np.sqrt(r)))
+    cols = int(np.ceil(r / rows))
+
+    grid_points = [(i, j) for i in range(rows) for j in range(cols)]
+    grid_points = np.array(grid_points[:r], dtype=int)
+
+    # Check if each input coord matches one of the grid points
+    return np.any((coords[:, None] == grid_points).all(-1), axis=1)

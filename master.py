@@ -1,19 +1,20 @@
 #%%
-import discrete_turning
+import simulation
 import models
 import plots
 import numpy as np
 import matplotlib.pyplot as plt
 import importlib
 import parameters
+import analysis
 import shapes
 #%%
-importlib.reload(discrete_turning)
+importlib.reload(simulation)
 importlib.reload(models)
 importlib.reload(plots)
 importlib.reload(shapes)
 importlib.reload(parameters)
-
+importlib.reload(analysis)
 #%%
 # morphogenesis: a = A - gamma
 # f(u, v) = (Au + Bv + C )- gamma_u u
@@ -34,9 +35,9 @@ dt = 0.001 # time step
 n = int(T/dt) # number of iterations
 Du, Dv = 0.5, 10
 
-u, v = discrete_turning.simulation(f, g, Du, Dv, n=n, dt=dt, show=True)
+u, v, _ = simulation.simulation(f, g, Du, Dv, n=n, dt=dt, show=True)
 params = a, b, c, d, e, w, Du, Dv
-plots.turing_check(params)
+parameters.turing_check(params)
 
 # if Re(lamda(0)) > 0 the system is unstable without diffusion (bad)
 # if Re(lamda(k)) > 0 for some nonzero k, the system is unstable and can form a pattern
@@ -50,7 +51,7 @@ import ast
 import re
 
 valid_params = []
-with open('valid_params_19june.txt', 'r') as file:
+with open('valid_params_23june.txt', 'r') as file:
     for line in file:
         line = line.strip()
         # Remove trailing dot if present (optional)
@@ -89,7 +90,7 @@ k_unique = np.unique(np.round(np.sort(-k_sqrt), decimals=6))  # to remove duplic
  # k between 0.0888577 ->
  
 
-eigevalue_wavesize = -0.3
+eigevalue_wavesize = -2
 num_selected = 20
 
 #indices = [i for i, param in enumerate(valid_params)]
@@ -146,7 +147,7 @@ initial_conditions = np.ones((400, 2)) /2
 shape = shapes.grid_check
 n = 50000
 show = True
-u, v = discrete_turning.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=show)
+u, v, _ = simulation.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=show)
 #plots.turing_check(f, g, Du, Dv)
 #%%
 plots.dispersion_plot(params, model, grid_size)
@@ -167,7 +168,7 @@ initial_conditions = np.ones((400, 2)) /2
 
 shape = shapes.grid_check
 n = 30000
-u, v = discrete_turning.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=True)
+u, v, _ = simulation.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=True)
 
 #%%
 # adds the small grid into the big grid:
@@ -247,7 +248,7 @@ u_reshape, v_reshape = reshape_output(u, v)
 initial_conditions = np.column_stack((u_reshape, v_reshape))
 shape = fix_u_nodes(u, perc=95)
 n = 20000
-u_new, v_new = discrete_turning.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=True)
+u_new, v_new, _ = simulation.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=True)
 
 #%%
 def apply_mask_with_fill(u, grid_size, mask, fill_value=np.nan): # refill to grid size before removal
@@ -277,7 +278,7 @@ initial_conditions = np.column_stack((u_reshape, v_reshape))
 # new shape reapplies condition
 shape = fix_u_nodes(u_full, perc=60)
 n = 20000
-u_newest, v_newest = discrete_turning.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=True)
+u_newest, v_newest, _ = simulation.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=True)
 
 
 # plt.scatter(np.arange(len(u)), u)
