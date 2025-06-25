@@ -95,7 +95,7 @@ num_selected = 20
 
 #indices = [i for i, param in enumerate(valid_params)]
 
-# filter where the peak is positive
+# filter where the peak is positive (param[10] is lambda)
 filtered_growth = [(i, param) for i, param in enumerate(valid_params) if np.real(param[9]) > 0]
 
 # find the k value at peak and the peak/width score

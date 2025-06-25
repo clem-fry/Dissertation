@@ -82,6 +82,33 @@ plt.ylabel('C(growth rate)')
 plt.grid(True)
 plt.show()
 
+# %% PLOT OF DU AT CRITICAL RATIO
+params = valid_params[612][:8]
+a, b, c, d, e, w, Dv, Du = params
+Du_array = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
+critical_ratio = (a*e - 2*b*d + 2*np.sqrt(b*d*(b*d - a*e))) / a**2
+Dv_array = Du_array * critical_ratio
+eigvals_list = []
+lambda_alpha_list = []
+
+for i in range(len(Du_array)):
+    Du = Du_array[i]
+    Dv = Dv_array[i]
+    params = params[:6] + (Du, Dv)
+    eigvals, eigvecs, lambda_alpha = analysis.linear_stability(params)
+    eigvals_list.append(eigvals)
+    lambda_alpha_list.append(lambda_alpha.real)
+for i in range(len(Du_array)):
+    plt.plot(eigvals_list[i], lambda_alpha_list[i], label=f'Du={Du_array[i]:.2f}')
+
+plt.axhline(0, color='gray', linestyle='--')
+plt.xlabel("Eigenvalues")
+plt.ylabel("Lambda Alpha")
+plt.legend()
+plt.title("Stability curves for varying Du")
+plt.grid(True)
+plt.show()
+
 # %%
 a, b, c, d, e, w, Du, Dv = valid_params[param_number][:8]
 params = a, b, c, d, e, w, Du, Dv
