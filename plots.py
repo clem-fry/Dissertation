@@ -8,13 +8,20 @@ import shapes
 
 # %%
 
-def dispersion_relation_plot(params, grid_size=20, plot=True, save=False, save_path = "simulation_final.png", shape = shapes.grid_check, model = models.linear):
-    eigvals, eigvecs, lambda_alpha = analysis.linear_stability(params, grid_size=grid_size, shape = shape, model=model)
+def dispersion_relation_plot(params, continuous = False, grid_size=20, plot=True, save=False, save_path = "simulation_final.png", shape = shapes.grid_check, model = models.linear):
+    if continuous:
+        eigvals = np.arange(-10, 0, 0.1)
+        lambda_alpha = analysis.growth_rate(params, eigvals)
+    else:
+        eigvals, eigvecs, lambda_alpha = analysis.linear_stability(params, grid_size=grid_size, shape = shape, model=model)
     #valid = eigvals < -0.000001
 
     if plot or save:
         fig, ax = plt.subplots()
-        ax.plot(eigvals, lambda_alpha.real, 'o')
+        if continuous:
+            ax.plot(eigvals, lambda_alpha.real)
+        else:
+            ax.plot(eigvals, lambda_alpha.real, 'o')
         ax.axhline(0, color='gray', linestyle='--')
         ax.set_title('Dispersion Relation')
         ax.set_xlabel('Laplacian Eigenvalue')

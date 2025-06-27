@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import shapes # grid_check, circle_outline_check, heart_outline_check
 import models
 
-threshold = 1.5 # what counts as a neighbour?
+threshold = 100 # what counts as a neighbour?
 dt = .001 # time step
 
 class Node:

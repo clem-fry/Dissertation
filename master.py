@@ -51,19 +51,38 @@ import ast
 import re
 
 valid_params = []
-with open('valid_params_23june.txt', 'r') as file:
+with open('valid_params_25june.txt', 'r') as file:
     for line in file:
         line = line.strip()
-        # Remove trailing dot if present (optional)
+
+        # Remove trailing dot (if mistakenly added during printing)
         if line.endswith('.'):
             line = line[:-1]
 
-        # Replace np.float64(xxx) with xxx using regex
-        clean_line = re.sub(r'np\.(?:float64|complex128)\(([^)]+)\)', r'\1', line)
-        
-        # Safely parse the tuple string to a tuple
-        tup = ast.literal_eval(clean_line)
-        valid_params.append(tup)
+        # Replace NumPy wrappers with raw values
+        line = re.sub(r'np\.(?:float64|complex128)\(([^)]+)\)', r'\1', line)
+        line = line.replace('np.False_', 'False').replace('np.True_', 'True')
+
+        # Now it's a clean literal tuple
+        try:
+            tup = ast.literal_eval(line)
+            valid_params.append(tup)
+        except Exception as e:
+            print(f"Skipping line due to parse error: {line} ({e})")
+
+valid_params = [p[:5] for p in valid_params if p[-1] == True]
+
+#%% PARAM CHOOSING
+
+goal_eig = -2
+goal_growth = 1
+goal_root_width = 1
+
+param_list = parameters.find_suitable_params(goal_eig, goal_growth, goal_root_width, valid_params)
+a, b, c, d = param_list[0][0]
+sigma = param_list[0][1]
+epsilon = param_list[0][2]
+_ = plots.dispersion_relation_plot((a, b, 0, c, d, 0, epsilon, sigma*epsilon), continuous=True)
 
 #%% CHOOSE INDICIES
 # some k = 2.4 start becoming overly pixelated and more difficult
