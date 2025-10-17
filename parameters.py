@@ -9,14 +9,14 @@ import re
 
 def find_params():
     param_ranges = {
-        'a': (0, 20), # a and e must be different signs
-        'b': (-20, 0), # b and d must be different signs
-        'd': (0, 20),
-        'e': (-20,0),
+        'a': (0, 100), # a and e must be different signs
+        'b': (-100, 0), # b and d must be different signs
+        'd': (0, 100),
+        'e': (-100,0),
     }
 
     model = models.linear
-    valid_params = suggest_parameters(param_ranges, model, n_trials = 5000)
+    valid_params = suggest_parameters(param_ranges, model, n_trials = 100000)
 
     with open('valid_params_25june.txt', 'w') as f:
         for item in valid_params:
@@ -85,7 +85,7 @@ def find_sigma_for_growth(J, target_growth):
         return peak_lambda(J, sigma) - target_growth
 
     critical_sigma = critical_ratio(J)
-    bracket = (critical_sigma, critical_sigma**3)
+    bracket = (critical_sigma, 300)
     sol = root_scalar(error, bracket=bracket, method='brentq')
     if sol.converged:
         return sol.root
@@ -96,7 +96,7 @@ def find_suitable_params(eig, growth, desired_root_spread, params):
     # ideal peak eig and growth, all valid params and the ideal spread of the roots
     param_sigma_root_list = []
 
-    for param in params:
+    for idx, param in enumerate(params):
         a, b, c, d = param[:4]
         J = non_spacial_jacobian(a, b, c, d)
         try:
@@ -104,16 +104,15 @@ def find_suitable_params(eig, growth, desired_root_spread, params):
         except:
             sigma = None
         if sigma is not None:
-            J = non_spacial_jacobian(a, b, c, d)
             epsilon = epsilon_for_eigenvalue(J, eig, sigma)
             root_width = np.sqrt((d + sigma * a)**2 - 4 * sigma * (a*d - b*c))/(sigma * epsilon)
-            param_sigma_root_list.append((param[:4], sigma, epsilon, root_width))
-
+            param_sigma_root_list.append((param[:4], sigma, epsilon, root_width, idx))
+            
     sorted_params = sorted(
         param_sigma_root_list,
         key=lambda x: abs(np.real(x[3]) - desired_root_spread)
     )
-
+    
     return sorted_params
 
 def suggest_parameters(param_ranges, model, n_trials=5000):
@@ -126,14 +125,11 @@ def suggest_parameters(param_ranges, model, n_trials=5000):
         if n % 100 == 0:
             print(n)
         # peak = False
-        a = round(np.random.uniform(*param_ranges['a']), 3)
-        b = round(np.random.uniform(*param_ranges['b']), 3)
-        d = round(np.random.uniform(*param_ranges['d']), 3)
-        e = round(np.random.uniform(*param_ranges['e']), 3)
-        #c = round(np.random.uniform(*param_ranges['c']), 3)
-        #w = round(np.random.uniform(*param_ranges['w']), 3)
-        # Du = round(np.random.uniform(*param_ranges['Du']), 3)
-        # Dv = round(np.random.uniform(*param_ranges['Dv']), 3)
+        a = np.round(np.random.uniform(*param_ranges['a']), 3)
+        b = np.round(np.random.uniform(*param_ranges['b']), 3)
+        d = np.round(np.random.uniform(*param_ranges['d']), 3)
+        e = np.round(np.random.uniform(*param_ranges['e']), 3)
+
         c, w = 0, 0
         f, g = model(a, b, c, d, e, w)
         try:

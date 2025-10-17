@@ -39,6 +39,15 @@ def schnakenberg(a, b):
         return(b-u**2*v)
     
     return f, g
+
+def initial_fill(grid_size, fill=None, pert=False):
+    initial = np.zeros((grid_size**2, 2))
+    if fill != None:
+        initial.fill(fill)
+
+    if pert == True:
+        initial += np.random.normal(loc=0.0, scale=1e-6, size=initial.shape)
+    return initial
 # %%
 
 def nonspacial_eigenvalues(f, g):

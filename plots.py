@@ -5,15 +5,17 @@ import analysis
 import numpy as np
 import matplotlib.pyplot as plt
 import shapes
+import matplotlib.image as mpimg
 
-# %%
+plt.rcParams.update({'font.size': 20})
 
-def dispersion_relation_plot(params, continuous = False, grid_size=20, plot=True, save=False, save_path = "simulation_final.png", shape = shapes.grid_check, model = models.linear):
+
+def dispersion_relation_plot(params, continuous = False, grid_size=20, plot=True, save=False, save_path = "simulation_final.png", shape = shapes.grid_check, model = models.linear, threshold=None):
     if continuous:
-        eigvals = np.arange(-10, 0, 0.1)
+        eigvals = np.arange(-30, 0, 0.1)
         lambda_alpha = analysis.growth_rate(params, eigvals)
     else:
-        eigvals, eigvecs, lambda_alpha = analysis.linear_stability(params, grid_size=grid_size, shape = shape, model=model)
+        eigvals, eigvecs, lambda_alpha = analysis.linear_stability(params, grid_size=grid_size, shape = shape, model=model, threshold=threshold)
     #valid = eigvals < -0.000001
 
     if plot or save:
@@ -23,9 +25,8 @@ def dispersion_relation_plot(params, continuous = False, grid_size=20, plot=True
         else:
             ax.plot(eigvals, lambda_alpha.real, 'o')
         ax.axhline(0, color='gray', linestyle='--')
-        ax.set_title('Dispersion Relation')
-        ax.set_xlabel('Laplacian Eigenvalue')
-        ax.set_ylabel('Re(λ) - growth rate')
+        ax.set_xlabel('Laplacian Eigenvalue $\Lambda$')
+        ax.set_ylabel('Growth rate Re(λ)')
         ax.grid(True)
         if save:
             fig.savefig(save_path)
@@ -36,38 +37,42 @@ def dispersion_relation_plot(params, continuous = False, grid_size=20, plot=True
 
     return lambda_alpha, eigvals
 
-def plot_dispersion_turing(valid_params, indicies, initial_conditions=None, grid_size = 20):
+def plot_dispersion_turing(parameters, indicies, initial_conditions=None, grid_size = 20):
     for i in indicies:
-        a, b, c, d, e, w, Du, Dv = valid_params[i][0:8]
-        f, g = models.linear(a, b, c, d, e, w)
+        a, b, c, d = parameters[i][0]
+        sigma = parameters[i][1]
+        Du = parameters[i][2]
+        root_width = parameters[i][3]
+        Dv = sigma * Du
+        f, g = models.linear(a, b, 0, c, d, 0)
+
         if np.any(initial_conditions == None):
-            u, v, _ = simulation.simulation(f, g, Du, Dv, n = 30000, show=False, save=True, grid_size=grid_size, save_path=f"plots/simulation_plot_{i}.png")
+            u, v, _ = simulation.simulation(f, g, Du, Dv, n = 30000, show=False, save=True, grid_size=grid_size, save_path=f"plots/simulation_plot_{parameters[i][4]}.png")
         else:
-            u, v, _ = simulation.simulation(f, g, Du, Dv, n = 30000, initial_conditions = initial_conditions, grid_size=grid_size, show=False, save=True, save_path=f"plots/simulation_plot_{i}.png")
+            u, v, _ = simulation.simulation(f, g, Du, Dv, n = 30000, initial_conditions = initial_conditions, grid_size=grid_size, show=False, save=True, save_path=f"plots/simulation_plot_{parameters[i][4]}.png")
         
-        print(analysis.turing_check(valid_params[i][0:8]))
-        _ = dispersion_relation_plot(valid_params[i][0:8], plot=False, save=True, save_path=f"plots/dispersion_plot_{i}.png")
+        params = (a, b, 0, c, d, 0, Du, Dv)
+        _ = dispersion_relation_plot(params, plot=False, save=True, save_path=f"plots/dispersion_plot_{parameters[i][4]}.png")
 
     fig, axes = plt.subplots(5, 2, figsize=(12, 20))
 
     for idx, i in enumerate(indicies):
-        sim_img = mpimg.imread(f"plots/simulation_plot_{i}.png")
-        disp_img = mpimg.imread(f"plots/dispersion_plot_{i}.png")
-        
+
+        sim_img = mpimg.imread(f"plots/simulation_plot_{parameters[i][4]}.png")
+        disp_img = mpimg.imread(f"plots/dispersion_plot_{parameters[i][4]}.png")
         axes[idx, 0].imshow(sim_img)
         axes[idx, 0].axis('off')
-        axes[idx, 0].set_title(f'Simulation {i}')
+        axes[idx, 0].set_title(f'Simulation {parameters[i][4]}')
         
         axes[idx, 1].imshow(disp_img)
         axes[idx, 1].axis('off')
-        axes[idx, 1].set_title(f'Dispersion Relation {i}')
+        axes[idx, 1].set_title(f'Dispersion Relation {parameters[i][4]}')
 
     plt.tight_layout()
     plt.show()
-# %%
+
 from scipy.signal import find_peaks
 
-#%% not currently used really:
 
 def measure_pattern_strength(u):
     # change this to a more sophisticated mesure?

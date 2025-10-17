@@ -20,7 +20,7 @@ importlib.reload(parameters)
 
 # functions for calculating quadratic of growth rate from laplacian eigenvalues
 
-def linear_stability(params, grid_size = 20, shape = shapes.grid_check, model = models.linear):
+def linear_stability(params, grid_size = 20, shape = shapes.grid_check, model = models.linear, threshold=None):
     a, b, c, d, e, w, Du, Dv = params
     #c, w = 0, 0
     f, g = model(a, b, c, d, e, w)
@@ -30,7 +30,7 @@ def linear_stability(params, grid_size = 20, shape = shapes.grid_check, model = 
     all_nodes, border_nodes = simulation.shape_nodes(shape, grid_size, initial_conditions)
     valid_nodes = [node for node in all_nodes.flatten() if node is not None]
 
-    adjacency_matrix = simulation.compute_adjacency_matrix(valid_nodes)
+    adjacency_matrix = simulation.compute_adjacency_matrix(valid_nodes, threshold=threshold)
     degree_matrix = simulation.compute_degree_matrix(adjacency_matrix)
 
     L = adjacency_matrix - degree_matrix
@@ -66,6 +66,179 @@ def eigvalue_roots(params):
     root_pos = (-B + np.sqrt(B**2 - 4 * A * C))/(2*A)
     root_neg = (-B - np.sqrt(B**2 - 4 * A * C))/(2*A)
     return [root_pos, root_neg]
+
+
+def calc_laplacian(shape, grid_size):
+    initial_conditions = np.random.rand(grid_size*grid_size, 2)
+    all_nodes, border_nodes = simulation.shape_nodes(shape, grid_size, initial_conditions)
+    valid_nodes = [node for node in all_nodes.flatten() if node is not None]
+    adjacency_matrix = simulation.compute_adjacency_matrix(valid_nodes)
+    degree_matrix = simulation.compute_degree_matrix(adjacency_matrix)
+    L = adjacency_matrix - degree_matrix
+    return L
+
+from scipy.fftpack import dctn
+
+def plot_wavelength_spectrum(u_grid, plot_spectrum=True, log_scale=True):
+    ny, nx = u_grid.shape  # Allow rectangular grids
+    
+    # 1. Compute 2D DCT (Type-II), respects Neumann BCs
+    pattern_dct = dctn(u_grid, norm='ortho')
+    power_spectrum = np.abs(pattern_dct) ** 2
+
+    # 2. Remove DC component (small region near [0, 0])
+    power_spectrum[0:2, 0:2] = 0
+
+    # 3. Generate DCT frequency coordinates
+    fx = np.arange(nx) / (2 * nx)  # x-frequencies
+    fy = np.arange(ny) / (2 * ny)  # y-frequencies
+    fx_grid, fy_grid = np.meshgrid(fx, fy, indexing='xy')
+
+    # 4. Flatten to 1D arrays
+    fx_flat = fx_grid.ravel()
+    fy_flat = fy_grid.ravel()
+    power_flat = power_spectrum.ravel()
+
+    # 5. Compute frequency magnitude and wavelength
+    k_mags = np.sqrt(fx_flat**2 + fy_flat**2)
+    with np.errstate(divide='ignore'):
+        wavelengths = 1 / k_mags
+
+    # 6. Filter out infinite and zero frequency components
+    valid = np.isfinite(wavelengths) & (k_mags > 0)
+    wavelengths = wavelengths[valid]
+    power_flat = power_flat[valid]
+
+    # 7. Plot
+    if plot_spectrum:
+        plt.figure(figsize=(8, 4))
+        plt.scatter(wavelengths, power_flat, s=10, alpha=0.7)
+        if log_scale:
+            plt.xscale('log')
+            plt.yscale('log')
+        plt.xlabel('Wavelength $\ell$ (grid units)')
+        plt.ylabel('Power')
+        plt.grid(True, which='both', ls='--', lw=0.5)
+        plt.tight_layout()
+        plt.show()
+
+    return wavelengths, power_flat
+
+
+from scipy.fftpack import dctn, fftshift
+
+def strongest_wavelength(u_grid, plot=False):
+    ny, nx = u_grid.shape  # support rectangular
+    
+    # Compute 2D DCT
+    pattern_dct = dctn(u_grid, norm='ortho')
+    power_spectrum = np.abs(pattern_dct) ** 2
+
+    # Remove DC component
+    power_spectrum[0:2, 0:2] = 0
+
+    # 3. Generate DCT frequency coordinates
+    fx = np.arange(nx) / (2 * nx)  # x-frequencies
+    fy = np.arange(ny) / (2 * ny)  # y-frequencies
+    fx_grid, fy_grid = np.meshgrid(fx, fy, indexing='xy')
+
+    # Find max power frequency index
+    max_idx = np.unravel_index(np.argmax(power_spectrum), power_spectrum.shape)
+    kx = fx_grid[max_idx]
+    ky = fy_grid[max_idx]
+    k_mag = np.sqrt(kx**2 + ky**2)
+
+    if k_mag > 0:
+        wavelength = 1 / k_mag
+        wavelength = round(wavelength, 4)
+    else:
+        wavelength = None
+
+    if plot:
+        plt.figure(figsize=(6, 6))
+        plt.imshow(np.log1p(power_spectrum), cmap='inferno', origin='lower')
+        plt.title('2D DCT Power Spectrum (log scale)')
+        plt.colorbar()
+        plt.tight_layout()
+        plt.show()
+
+    return wavelength
+
+def strongest_frequency(u_grid, plot=False):
+    ny, nx = u_grid.shape  # support rectangular
+    
+    # Compute 2D DCT
+    pattern_dct = dctn(u_grid, norm='ortho')
+    power_spectrum = np.abs(pattern_dct) ** 2
+
+    # Remove DC component
+    power_spectrum[0:2, 0:2] = 0
+
+    # 3. Generate DCT frequency coordinates
+    fx = np.arange(nx) / (2 * nx)  # x-frequencies
+    fy = np.arange(ny) / (2 * ny)  # y-frequencies
+    fx_grid, fy_grid = np.meshgrid(fx, fy, indexing='xy')
+
+    # Find max power frequency index
+    max_idx = np.unravel_index(np.argmax(power_spectrum), power_spectrum.shape)
+    kx = fx_grid[max_idx]
+    ky = fy_grid[max_idx]
+    k_mag = np.sqrt(kx**2 + ky**2)
+
+    if plot:
+        plt.figure(figsize=(6, 6))
+        plt.imshow(np.log1p(power_spectrum), cmap='inferno', origin='lower')
+        plt.title('2D DCT Power Spectrum (log scale)')
+        plt.colorbar()
+        plt.tight_layout()
+        plt.show()
+
+    return k_mag
+
+
+def strongest_wavelength_fft(u_grid, plot=False):
+    ny, nx = u_grid.shape  # assume square grid (N x N)
+
+    # 1. Compute 2D FFT and power spectrum
+    pattern_fft = np.fft.fft2(u_grid)
+    power_spectrum = np.abs(pattern_fft) ** 2
+
+    # 2. Shift zero frequency to center
+    power_spectrum = np.fft.fftshift(power_spectrum)
+
+    # 3. Remove DC component (center of the spectrum)
+    center_y, center_x = ny // 2, nx // 2
+    power_spectrum[center_y:center_y+1, center_x:center_x+1] = 0
+
+    # 4. Generate FFT frequency coordinates
+     # range: [-0.5, 0.5)
+    fx = np.fft.fftshift(np.fft.fftfreq(nx))
+    fy = np.fft.fftshift(np.fft.fftfreq(ny))
+    fx_grid, fy_grid = np.meshgrid(fx, fy, indexing='xy')
+
+    # 5. Find the frequency with maximum power
+    max_idx = np.unravel_index(np.argmax(power_spectrum), power_spectrum.shape)
+    kx = fx_grid[max_idx]
+    ky = fy_grid[max_idx]
+    k_mag = np.sqrt(kx**2 + ky**2)
+
+    # 6. Convert frequency magnitude to wavelength
+    if k_mag > 0:
+        wavelength = 1 / k_mag
+        wavelength = round(wavelength, 4)
+    else:
+        wavelength = None
+
+    # 7. Optional plot
+    if plot:
+        plt.figure(figsize=(6, 6))
+        plt.imshow(np.log1p(power_spectrum), cmap='inferno', origin='lower')
+        plt.title('2D FFT Power Spectrum (log scale)')
+        plt.colorbar()
+        plt.tight_layout()
+        plt.show()
+
+    return wavelength
 
 # 752 , 404, 847
 

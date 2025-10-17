@@ -70,15 +70,16 @@ def line_check(r, coords):
     return (y == 1)
 
 def point_number(r, coords):
+    # points = (grid_size / 2)**2
     coords = np.atleast_2d(coords)
 
-    r = int(r**2)
+    r = int(r*2)
     # Generate r integer grid points laid out in a compact grid (e.g., row-first)
     rows = int(np.floor(np.sqrt(r)))
     cols = int(np.ceil(r / rows))
 
     grid_points = [(i, j) for i in range(rows) for j in range(cols)]
-    grid_points = np.array(grid_points[:r], dtype=int)
+    grid_points = np.array(grid_points[:r], dtype=int) + 1
 
     # Check if each input coord matches one of the grid points
     return np.any((coords[:, None] == grid_points).all(-1), axis=1)

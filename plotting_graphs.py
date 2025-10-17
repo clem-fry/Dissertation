@@ -8,6 +8,8 @@ import importlib
 import parameters
 import analysis
 import shapes
+import matplotlib.image as mpimg
+
 #%%
 importlib.reload(simulation)
 importlib.reload(models)
@@ -17,7 +19,6 @@ importlib.reload(parameters)
 importlib.reload(analysis)
 
 #%%
-
 valid_params = parameters.load_params('valid_params_25june.txt')
 # remove any oscillations!!
 valid_params = [p[:5] for p in valid_params if p[-1] == True]
@@ -124,21 +125,41 @@ plt.title("Stability curves for varying gv , Dv = 13, Du = 0.1, params = 20")
 plt.grid(True)
 plt.show()
 
+#%% COMPARING PARAMETERS
+# -5, 1, 0.5 nice spots
+# -2.5, 10, 3 nice width
+# 
+#  stripes?
+
+# smaller eig -> bigger wavelength
+
+desired_eig = -4 # exact
+desired_growth = 4 # exact
+desired_width = 0.1 # kind of
+
+grid_size = 10
+initial = None #models.initial_fill(grid_size, 0.5, pert=True)
+
+optimal = parameters.find_suitable_params(desired_eig, desired_growth, desired_width, valid_params)
+
+plots.plot_dispersion_turing(optimal, [1, 2, 3, 4, 5], grid_size = grid_size, initial_conditions = initial)
+
 #%% COMPARING EIGENVALUES OF DIFFERENT NUMBER OF NODES
 # 612 - oscillation
-optimal = parameters.find_suitable_params(-2, 0.1, valid_params, 20)
-a, b, d, e = optimal["params"]
-sigma = optimal["sigma"]
-Du = optimal["epsilon"]
-Dv = sigma * Du
-c, w = 0, 0
+# -2.5, 10, 3
+desired_eig = -3 # exact
+desired_growth = 0.5 # exact
+desired_width = 0.5 # kind of
 
-J = parameters.non_spacial_jacobian(a, b, d, e)
-Du = parameters.epsilon_for_eigenvalue(J, -2, sigma)
+optimal = parameters.find_suitable_params(desired_eig, desired_growth, desired_width, valid_params)
+option = 0
+a, b, c, d = optimal[option][0]
+sigma = optimal[option][1]
+Du = optimal[option][2]
+root_width = optimal[option][3]
 Dv = sigma * Du
 
-c, w = 0, 0
-params = a, b, c, d, e, w, Du, Dv
+params = a, b, 0, c, d, 0, Du, Dv
 
 lambda_alpha_one, eigvals_one = plots.dispersion_relation_plot(params, grid_size=1, plot=False,  shape = shapes.line_check, model = models.linear)
 lambda_alpha_two, eigvals_two = plots.dispersion_relation_plot(params, grid_size=2, plot=False,  shape = shapes.line_check, model = models.linear)
@@ -146,9 +167,12 @@ lambda_alpha_three, eigvals_three = plots.dispersion_relation_plot(params, grid_
 lambda_alpha_four, eigvals_four = plots.dispersion_relation_plot(params, grid_size=4, plot=False,  shape = shapes.line_check, model = models.linear)
 lambda_alpha_five, eigvals_five = plots.dispersion_relation_plot(params, grid_size=5, plot=False,  shape = shapes.line_check, model = models.linear)
 lambda_alpha_six, eigvals_six = plots.dispersion_relation_plot(params, grid_size=6, plot=False,  shape = shapes.line_check, model = models.linear)
+# lambda_alpha_seven, eigvals_seven = plots.dispersion_relation_plot(params, grid_size=6, plot=False,  shape = shapes.line_check, model = models.linear)
+# lambda_alpha_eight, eigvals_eight = plots.dispersion_relation_plot(params, grid_size=6, plot=False,  shape = shapes.line_check, model = models.linear)
+lambda_alpha_nine, eigvals_nine = plots.dispersion_relation_plot(params, grid_size=9, plot=False,  shape = shapes.line_check, model = models.linear)
 
 #%% PLOT OF GROWTH RATE FOR SYSTEMS
-x_axis = np.arange(np.floor(np.min(np.real(eigvals_six))), 0.1, 0.1)
+x_axis = np.arange(np.floor(np.min(np.real(eigvals_nine))), 0.1, 0.1)
 y_axis = analysis.growth_rate(params, x_axis)
 
 plt.plot(eigvals_one, lambda_alpha_one, 'x')
@@ -157,17 +181,60 @@ plt.plot(eigvals_three, lambda_alpha_three, 'o')
 plt.plot(eigvals_four, lambda_alpha_four, 'x')
 plt.plot(eigvals_five, lambda_alpha_five, '*')
 plt.plot(eigvals_six, lambda_alpha_six, 'o')
+plt.plot(eigvals_nine, lambda_alpha_nine, 'x')
 
 plt.axhline(y=0, color='grey', linestyle='--', linewidth=1)
 plt.plot(x_axis, y_axis, color='green', linestyle='--')
 plt.grid(True)
 plt.xlabel('Eigenvalues')
 plt.ylabel('Lambda Alpha: Growth Rate')
-plt.legend(['one', 'two', 'three', 'four', 'five', 'six'], title='Number of fully connected nodes')
+plt.legend(['one', 'two', 'three', 'four', 'five', 'six', 'nine'], title='Number of fully connected nodes')
 
 plt.show()
 
-# %% PLOT OF SPACIAL INSTABILITY -> unstable when negative
+#%%
+f, g = models.linear(a, b, 0, c, d, 0)
+grid_size = 2
+n = 300
+dt = 0.001
+u0, v0 = parameters.find_steady_state(f, g, initial_guess=(0.0, 0.0))
+#initial = np.tile([u0, v0], (grid_size ** 2, 1)) 
+initial = np.zeros((grid_size**2, 2))
+initial += np.random.normal(loc=0.0, scale=1e-6, size=initial.shape)
+print(initial[0][0])
+# kilobot_id = [858, 448, 497, 709, 545]
+# kilobot_id_array = np.array(kilobot_id, dtype=float)/ 1000
+# kilobot_id_array = np.where(np.array(kilobot_id) % 2 == 1, -kilobot_id_array, kilobot_id_array)
+# initial[:grid_size, 0] = kilobot_id_array
+# initial[:grid_size, 1] = kilobot_id_array
+initial[0:int(grid_size/2), :] = 0.1
+initial[int(grid_size/2):, :] = -0.1
+# initial += np.random.normal(loc=0.0, scale=1e-3, size=initial.shape)
+u_vector, v_vector, (u_log, v_log) = simulation.simulation(f, g, Du, Dv, grid_size = grid_size, n = n, initial_conditions = initial, dt = dt, shape = shapes.point_number)
+# node_n = 0
+x_axis = np.arange(0, n, 1)
+plt.plot(x_axis, u_log.T)
+plt.xlabel('time (s)')
+plt.title(f"{grid_size} nodes fully connected with params ")
+plt.ylabel('u values')
+plt.grid(True)
+plt.show()
+
+#%% recreating u analytically:
+from numpy import linalg as LA
+n = 300
+dt = 0.001
+L = analysis.calc_laplacian(shapes.line_check, 3)
+eigenvalues, eigenvectors = LA.eig(L)
+t = np.linspace(0, n*dt, n)
+lambdas = lambda_alpha_three[:, np.newaxis]  # shape (3, 1)
+exp_terms = np.exp(lambdas * t)              # shape (3, 1000)
+weights = eigenvectors[0][:, np.newaxis]      # shape (3, 1)
+du_rec = np.sum(weights * exp_terms, axis=0)  # shape (1000,)
+u_rec = initial[0][0] + np.cumsum(du_rec)
+plt.plot(t, u_rec)
+
+ # %% PLOT OF SPACIAL INSTABILITY -> unstable when negative
 
 x_axis = np.arange(-10, 0, 1)
 y_axis = Du * Dv * x_axis ** 2 + (Du * e + Dv * a) * x_axis + (a*e - b*d)

@@ -51,7 +51,7 @@ import ast
 import re
 
 valid_params = []
-with open('valid_params_25june.txt', 'r') as file:
+with open('valid_params.txt', 'r') as file:
     for line in file:
         line = line.strip()
 
@@ -74,16 +74,63 @@ valid_params = [p[:5] for p in valid_params if p[-1] == True]
 
 #%% PARAM CHOOSING
 
-goal_eig = -2
-goal_growth = 1
-goal_root_width = 1
+goal_eig = -4
+goal_growth = 30
+goal_root_width = 0.5
 
 param_list = parameters.find_suitable_params(goal_eig, goal_growth, goal_root_width, valid_params)
 a, b, c, d = param_list[0][0]
 sigma = param_list[0][1]
 epsilon = param_list[0][2]
-_ = plots.dispersion_relation_plot((a, b, 0, c, d, 0, epsilon, sigma*epsilon), continuous=True)
+_ = plots.dispersion_relation_plot((a, b, 0, c, d, 0, epsilon, sigma*epsilon), grid_size = 10, continuous=False)
 
+#%%
+
+# %%
+desired_eig = -4 # exact
+desired_growth = 5 # exact
+desired_width = 0.1 # kind of
+
+grid_size = 20
+initial = models.initial_fill(grid_size, 0.5)
+
+optimal = parameters.find_suitable_params(desired_eig, desired_growth, desired_width, valid_params)
+
+plots.plot_dispersion_turing(optimal, [0, 1, 2, 3, 5], grid_size = grid_size, initial_conditions = initial)
+#%%
+
+a, b, c, d = optimal[2][0]
+a, b, c, d = 49.373, -82.998, 61.178, -93.445
+sigma = optimal[2][1]
+Du = optimal[2][2]
+root_width = optimal[2][3]
+Dv = sigma * Du
+Du, Dv = 2.0394, 82.322
+f, g = models.linear(a, b, 0, c, d, 0)
+grid_size = 10
+u_vector, v_vector, (u_log, v_log) = simulation.simulation(f, g, Du, Dv, grid_size=grid_size, n = 2500, dt = 0.001, initial_conditions = initial, shape = shapes.grid_check, show=True)
+
+#%%
+
+u_grid = u_vector.reshape((grid_size, grid_size))
+fig, ax = plt.subplots(figsize=(6,6))
+im = ax.imshow(u_grid, cmap='viridis', interpolation='none')
+
+# Set ticks at pixel edges
+ax.set_xticks(np.arange(u_grid.shape[1] + 1) - 0.5)
+ax.set_yticks(np.arange(u_grid.shape[0] + 1) - 0.5)
+
+# Draw white grid lines
+ax.grid(which='major', color='white', linestyle='-', linewidth=1)
+
+# Hide ticks (optional)
+ax.tick_params(which='both', bottom=False, left=False, labelbottom=False, labelleft=False)
+
+# Remove axes spines
+for spine in ax.spines.values():
+    spine.set_visible(False)
+
+plt.show()
 #%% CHOOSE INDICIES
 # some k = 2.4 start becoming overly pixelated and more difficult
 # could be worked on?
@@ -109,13 +156,13 @@ k_unique = np.unique(np.round(np.sort(-k_sqrt), decimals=6))  # to remove duplic
  # k between 0.0888577 ->
  
 
-eigevalue_wavesize = -2
+eigevalue_wavesize = -12
 num_selected = 20
 
 #indices = [i for i, param in enumerate(valid_params)]
 
 # filter where the peak is positive (param[10] is lambda)
-filtered_growth = [(i, param) for i, param in enumerate(valid_params) if np.real(param[9]) > 0]
+#filtered_growth = [(i, param) for i, param in enumerate(valid_params) if np.real(param[9]) > 0]
 
 # find the k value at peak and the peak/width score
 # must be positive lambda growth
@@ -151,22 +198,40 @@ initial_conditions = np.ones((400, 2)) /2
 parameters.plot_dispersion_turing(valid_params, closest_indices[:5], initial_conditions=initial_conditions) #, initial_conditions=initial_conditions
 
 #%% SPECIFIC REPEAT?
-grid_size = 20
-params = valid_params[300][:8]
-a, b, c, d, e, w, Du, Dv = params
-model = models.linear
-f, g = model(a, b, c, d, e, w)
+a, b, c, d = 49.373, -82.998, 61.178, -93.445
+J = parameters.non_spacial_jacobian(a, b, c, d)
+f, g = models.linear(a, b, 0, c, d, 0)
+grid_size = 10
+dt = 0.001
+eig = -2
+desired_growth = 30 # exact
+#desired_width = 0.1 # kind of
+initial = models.initial_fill(grid_size, fill = -10, pert=True)
+#initial[1::2] = [1., 1.]
+sigma = parameters.find_sigma_for_growth(J, desired_growth)
+Du = parameters.epsilon_for_eigenvalue(J, eig, sigma)
+Dv = sigma * Du
+
+# params = valid_params[300][:8]
+# a, b, c, d, e, w, Du, Dv = params
+# model = models.linear
+# f, g = model(a, b, c, d, e, w)
 
 # initial not same u and v
 #initial_conditions = np.column_stack((np.full(400, 0.2), np.full(400, 0.8)))
 
 initial_conditions = np.ones((400, 2)) /2
-#initial_conditions = np.random.rand(400, 2)
+initial = models.initial_fill(grid_size=grid_size, pert=True, fill = 0)
 
 shape = shapes.grid_check
-n = 50000
+n = 5000
 show = True
-u, v, _ = simulation.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=show)
+
+u, v, (u_log, v_log) = simulation.simulation(f, g, Du, Dv, dt = 0.001, n = n, initial_conditions=initial, shape=shape, show=show, grid_size=grid_size)
+#%%
+_ = plt.plot(u_log.T)
+_ = plots.dispersion_relation_plot((a, b, 0, c, d, 0, Du, Dv), continuous=True, grid_size=10, threshold=1.9)
+wavelengths, powers = analysis.plot_wavelength_spectrum(u.reshape((10,10)), log_scale = False)
 #plots.turing_check(f, g, Du, Dv)
 #%%
 plots.dispersion_plot(params, model, grid_size)
@@ -175,24 +240,35 @@ plots.fourier_spectrum_plot(u)
 
 #%% scoring for robustness and sharpness with fourier spectrum
 
+#%%
 
+def reshape_output(u, v, grid_size):
+    u_reshape = u.reshape(grid_size, grid_size)
+    v_reshape = v.reshape(grid_size, grid_size)
+    u_reshape = u_reshape.T 
+    v_reshape = v_reshape.T 
+    u_reshape = u_reshape.flatten() 
+    v_reshape = v_reshape.flatten() 
+    return u_reshape, v_reshape
 
 #%% CHANGING SHAPE?
 
-a, b, c, d, e, w, Du, Dv = valid_params[478][:8]
-f, g = models.linear(a, b, c, d, e, w)
+# a, b, c, d, e, w, Du, Dv = valid_params[478][:8]
+# f, g = models.linear(a, b, c, d, e, w)
 
-initial_conditions = np.ones((400, 2)) /2
+u_reshape, v_reshape = reshape_output(u, v, grid_size=10)
+initial_conditions = np.column_stack((u_reshape, v_reshape))
 #initial_conditions = np.column_stack((np.full(400, 0.2), np.full(400, 0.8)))
 
-shape = shapes.grid_check
-n = 30000
-u, v, _ = simulation.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=True)
+shape = shapes.circle_outline_check
+# n = 30000
+n = 1000
+u, v, (u_log, v_log) = simulation.simulation(f, g, Du, Dv, n = n, initial_conditions=initial_conditions, shape=shape, show=True, threshold=1.5, grid_size=grid_size)
+_ = plt.plot(u_log.T)
 
 #%%
 # adds the small grid into the big grid:
-def add_grid_in(u, v):
-    r = 20 
+def add_grid_in(u, v, r):
     inner_min = r // 4 # small grid conditions
     inner_max = 3 * r // 4
 
@@ -202,8 +278,8 @@ def add_grid_in(u, v):
     mask = (inner_min <= coords[:, 0]) & (coords[:, 0] < inner_max) & \
         (inner_min <= coords[:, 1]) & (coords[:, 1] < inner_max)
 
-    u_array = np.ones(400)
-    v_array = np.ones(400)
+    u_array = np.ones(r * r)
+    v_array = np.ones(r * r)
 
     u_array[mask] = u
     v_array[mask] = v
@@ -251,19 +327,10 @@ def fix_u_nodes(u, perc=70):
     
     return fixed_shape
     
-#%%
 
-def reshape_output(u, v):
-    u_reshape = u.reshape(20, 20)
-    v_reshape = v.reshape(20, 20)
-    u_reshape = u_reshape.T 
-    v_reshape = v_reshape.T 
-    u_reshape = u_reshape.flatten() 
-    v_reshape = v_reshape.flatten() 
-    return u_reshape, v_reshape
 
 #%%
-u_reshape, v_reshape = reshape_output(u, v)
+u_reshape, v_reshape = reshape_output(u, v, grid_size=10)
 initial_conditions = np.column_stack((u_reshape, v_reshape))
 shape = fix_u_nodes(u, perc=95)
 n = 20000
