@@ -25,5 +25,3 @@ I created a control system for patterning a multi-agent system with a desired sp
 # Codebase
 
 The respository contains the code for two phases of the project - simulating the patterning behaviour and reproducing the results on the Kilobot robots. 
-
-![alt text](https://github.com/clem-fry/Dissertation/blob/main/media/kilobots.HEIC)
