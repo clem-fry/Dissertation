@@ -23,8 +23,6 @@ valid_params = parameters.load_params('valid_params.txt')
 # remove any oscillations!!
 valid_params = [p[:5] for p in valid_params if p[-1] == True]
 
-# 
-
 # -3, 10, 0.1 is good
 # smaller eig bigger wavelength
 desired_eig = -2 # exact
@@ -40,7 +38,6 @@ sigma = optimal[option][1]
 Du = optimal[option][2]
 root_width = optimal[option][3]
 Dv = sigma * Du
-
 
 #%%
 a, b, c, d = 49.373, -82.998, 61.178, -93.445
@@ -58,11 +55,11 @@ f, g = models.linear(a, b, 0, c, d, 0)
 
 u0, v0 = parameters.find_steady_state(f, g, initial_guess=(0.0, 0.0))
 n = 2000
-grid_size = 30
+grid_size = 10
 
 initial = models.initial_fill(grid_size, fill = 0, pert=True)
 
-u_vector, v_vector, (u_log, v_log) = simulation.simulation(f, g, Du, Dv, grid_size = grid_size, n = n, initial_conditions = initial, shape = shapes.grid_check, threshold=1.1)
+u_vector, v_vector, (u_log, v_log) = simulation.simulation(f, g, Du, Dv, grid_size = grid_size, n = n, initial_conditions = initial, shape = shapes.grid_check)
 
 x_axis = np.arange(0, n, 1)
 plt.plot(x_axis, u_log.T)
@@ -242,6 +239,7 @@ all_wavelengths = []
 all_powers = []
 
 #%%
+
 for (c, connection) in enumerate(connectivities):
     wavelengths = []
     powers = []
@@ -261,26 +259,32 @@ for (c, connection) in enumerate(connectivities):
             print(repeat)
             #grid_size = num
             Du = parameters.epsilon_for_eigenvalue(J, eig, sigma)
-            Dv = sigma * Du
+            Dv = sigma * Du # choose diffusion parameters based off ideal peak - continuous
             initial = models.initial_fill(grid_size, fill = 0, pert=True)
             u_vector, v_vector, (u_log, v_log) = simulation.simulation(f, g, Du, Dv, dt = dt, n = 5000, grid_size = grid_size, \
                                                                     initial_conditions = initial, \
                                                                     shape = shapes.grid_check, \
-                                                                    show=False, threshold=connection, threshold_variance=0)
+                                                                    show=False, threshold=connection)
             u_grid = u_vector.reshape((grid_size, grid_size))
-            wavelength = analysis.strongest_wavelength(u_grid, plot=False)
-            _, power_flat = analysis.plot_wavelength_spectrum(u_grid, plot_spectrum = False, log_scale=False)
-            powers_eig.append(power_flat) # len 50
-            repeat_array.append(wavelength)
+            #wavelength = analysis.strongest_wavelength(u_grid, plot=False)
 
-        powers.append(powers_eig) # len 24 eigenvalues
+            adjacency_matrix, degree_matrix, valid_nodes = simulation.generate_nodes(threshold=connection, shape = shapes.grid_check, grid_size=grid_size)
+
+            L = adjacency_matrix - degree_matrix
+            evals, power, dominant_lambda = analysis.graph_spectral_analysis(u_vector, L, k_eigs=100, plot=False)
+
+            _, power_flat = analysis.plot_wavelength_spectrum(u_grid, plot_spectrum = False, log_scale=False)
+            #powers_eig.append(power_flat) # len 50
+            repeat_array.append(dominant_lambda)
+
+        # powers.append(powers_eig) # len 24 eigenvalues
         # in this case only len 3
         wavelengths.append(repeat_array)
 
     # once per connection
-    all_powers[c][21] = powers
-    #all_wavelengths.append(wavelengths)
-    all_wavelengths[c][21] = wavelengths
+    # all_powers[c][21] = powers
+    all_wavelengths.append(wavelengths)
+    #all_wavelengths[c] = wavelengths
 
     
 #%% PLOT ALL
@@ -577,8 +581,31 @@ def gft_power_spectrum(u_grid, eigvals, eigvecs, plot=True):
 
     return eigvals, power_spectrum
 
-#%%
-from scipy.fftpack import dctn, fftshift
 
+# %% EIGENVALUES FOR DIFFERENT LAPLACIAN SETUPS
 
-# %%
+lambda_alpha_four, eigvals_four = plots.dispersion_relation_plot(params, grid_size=grid_size, plot=False,  shape = shapes.grid_check, model = models.linear, threshold = 2.1)
+
+lambda_alpha_eight, eigvals_eight = plots.dispersion_relation_plot(params, grid_size=grid_size, plot=False,  shape = shapes.grid_check, model = models.linear, threshold = 2.3)
+
+lambda_alpha_twelve, eigvals_twelve = plots.dispersion_relation_plot(params, grid_size=grid_size, plot=False,  shape = shapes.grid_check, model = models.linear, threshold = 3.1)
+
+plt.figure(figsize=(8, 5))
+
+plt.plot(eigvals_four, lambda_alpha_four,'X',
+         label='4-neighbour')
+
+plt.plot(eigvals_eight, lambda_alpha_eight, 'o',
+         label='8-neighbour')
+
+plt.plot(eigvals_twelve, lambda_alpha_twelve, 'x',
+         label='12-neighbour')
+
+plt.axhline(0, color='k', ls='--', alpha=0.5)
+
+plt.xlabel('Laplacian eigenvalue')
+plt.ylabel('Growth rate Re(λ)')
+plt.legend(loc='lower right')
+plt.grid(True)
+plt.tight_layout()
+plt.show()

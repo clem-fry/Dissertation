@@ -19,7 +19,9 @@ importlib.reload(parameters)
 importlib.reload(analysis)
 
 #%%
-valid_params = parameters.load_params('valid_params_25june.txt')
+#valid_params = parameters.load_params('valid_params_25june.txt')
+valid_params = parameters.load_params('valid_params.txt')
+
 # remove any oscillations!!
 valid_params = [p[:5] for p in valid_params if p[-1] == True]
 
@@ -69,7 +71,7 @@ lambda_alpha_list = []
 for i in range(len(fu_array)):
     a = fu_array[i]
     J = parameters.non_spacial_jacobian(a, b, d, e)
-    peak = 2
+    peak = 1
     sigma = parameters.find_sigma_for_growth(J, peak)
     eigenvalue = -4
     Du = parameters.epsilon_for_eigenvalue(J, eigenvalue, sigma)

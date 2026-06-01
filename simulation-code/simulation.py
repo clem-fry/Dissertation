@@ -188,7 +188,7 @@ def shape_nodes(shape_check, grid_size, initial_conditions):
 #                 return new_values[coord_to_index[(rx, ry)]]
 #     return None  # no valid result
 
-def simulation(f, g, Du, Dv, grid_size=20, n = 10000, dt = 0.001, initial_conditions = 'rand', shape = shapes.grid_check, show=True, save=False, save_path="simulation_final.png", threshold = None):
+def generate_nodes(threshold=None, shape = shapes.grid_check, grid_size=20, initial_conditions = 'rand'):
     if threshold != None:
         Node.threshold = threshold
     # creates all nodes
@@ -196,16 +196,22 @@ def simulation(f, g, Du, Dv, grid_size=20, n = 10000, dt = 0.001, initial_condit
         initial_conditions = np.random.rand(grid_size*grid_size, 2)
     
     all_nodes, border_nodes = shape_nodes(shape, grid_size, initial_conditions)
-    if show:
-        fig, axes = plt.subplots(3, 3, figsize=(8, 8))
-    step_plot = n // 9
 
     valid_nodes = [node for node in all_nodes.flatten() if node is not None]
-    coord_to_index = {(int(node.x), int(node.y)): i for i, node in enumerate(valid_nodes)}
-
+    
     adjacency_matrix = compute_adjacency_matrix(valid_nodes)
     degree_matrix = compute_degree_matrix(adjacency_matrix)
 
+    return adjacency_matrix, degree_matrix, valid_nodes
+
+def simulation(f, g, Du, Dv, grid_size=20, n = 10000, dt = 0.001, initial_conditions = 'rand', shape = shapes.grid_check, show=True, save=False, save_path="simulation_final.png", threshold = None):
+    step_plot = n // 9
+    adjacency_matrix, degree_matrix, valid_nodes = generate_nodes(threshold, shape, grid_size, initial_conditions)
+    coord_to_index = {(int(node.x), int(node.y)): i for i, node in enumerate(valid_nodes)}
+
+    if show:
+        fig, axes = plt.subplots(3, 3, figsize=(8, 8))
+    
     u_log = np.zeros((len(valid_nodes), n))
     v_log = np.zeros((len(valid_nodes), n))
 
