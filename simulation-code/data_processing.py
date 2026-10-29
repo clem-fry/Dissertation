@@ -22,7 +22,7 @@ importlib.reload(analysis)
 
 #%%
 
-data = np.load('ref10.npz')
+data = np.load('ref24.npz')
 print(data.files)
 # %%
 
@@ -61,10 +61,52 @@ print("grid")
 print(f"cv: {cv}")
 print(f"highest_power_mean: {highest_power_mean}")
 
+#%% GRAPH FOURIER TRANSFORM
+
+connection = 2.1
+
+kilobot_wavelengths = []
+labels_kilo = []
+all_powers = []
+highest_power = []
+
+file_names = ["ref10.npz", "ref11.npz", "ref13.npz", "ref14.npz", "ref16.npz", "ref17.npz"]
+eigenvalues = [-7, -3, -9, -5, -12, -2]
+diffusion_rates = [(1.16535, 47.04227), (2.719149, 109.7627), (0.9064,	36.587), (1.63148,	65.85763), (0.679787, 27.44068), (4.07872, 131.715267)]
+
+for idx, name in enumerate(file_names):
+    data = np.load(name)
+    eigen = eigenvalues[idx]
+    for i, (name, array) in enumerate(data.items()):
+        if i > 9:  # Only use 10 samples
+            break
+        array_grid = array.reshape((10, 10))
+        # plt.imshow(array_grid, cmap='bwr')
+        # plt.axis('off')
+        # plt.show()
+        #_ = analysis.plot_wavelength_spectrum(array_grid, 
+        
+        adjacency_matrix, degree_matrix, valid_nodes = simulation.generate_nodes(threshold=connection, grid_size=10)
+
+        L = adjacency_matrix - degree_matrix
+        evals, power, dominant_lambda = analysis.graph_spectral_analysis(np.array(array), L, k_eigs=100, plot=False)
+
+        all_powers.append(power)
+        kilobot_wavelengths.append(dominant_lambda)
+        highest_power.append(power.max())
+        labels_kilo.append((eigen, "Kilobot"))
+
+cv = np.std(all_powers, ddof=1) / np.mean(all_powers)
+highest_power_mean = np.array(highest_power).mean()
+
+print("grid")
+print(f"cv: {cv}")
+print(f"highest_power_mean: {highest_power_mean}")
+
 
 # cv = np.float64(2.235908347557892) for powers
 # mean = highest power np.float64(62878497577.86704)
-#%%
+#%% WAVELENGTH PLOT
 data = []
 
 for wave, (eigen, source) in zip(kilobot_wavelengths, labels_kilo):
@@ -82,6 +124,31 @@ plt.xlabel("Dominant Turing mode $\Lambda_m$")
 plt.ylabel("Strongest Wavelength $\ell$")
 #plt.legend(title="Source")
 plt.ylim(bottom=0)
+plt.tight_layout()
+plt.show()
+
+#%% EIGENMODE PLOT
+data = []
+
+for wave, (eigen, source) in zip(kilobot_wavelengths, labels_kilo):
+    data.append({"Eigenvalue": eigen, "Wavelength": wave, "Source": source})
+
+# for wave, (eigen, source) in zip(simulation_wavelengths, labels_sim):
+#     data.append({"Eigenvalue": eigen, "Wavelength": wave, "Source": source})
+
+df = pd.DataFrame(data)
+
+unique_eigen = sorted(df['Eigenvalue'].unique())
+groups = [df[df['Eigenvalue']==ev]['Wavelength'] for ev in unique_eigen]
+
+plt.figure(figsize=(8, 6))
+plt.boxplot(groups, positions=unique_eigen)
+plt.plot(unique_eigen, unique_eigen, '--k')
+plt.title('12 connectivity')
+plt.xlabel("Dominant Turing mode $\Lambda_m$")
+plt.ylabel("GFT Eigenmode $\ell$")
+#plt.legend(title="Source")
+#plt.ylim(bottom=0)
 plt.tight_layout()
 plt.show()
 

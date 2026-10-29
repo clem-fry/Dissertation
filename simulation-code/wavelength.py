@@ -9,7 +9,7 @@ import parameters
 import analysis
 import shapes
 import matplotlib.image as mpimg
-
+from scipy.optimize import curve_fit
 #%%
 importlib.reload(simulation)
 importlib.reload(models)
@@ -25,8 +25,8 @@ valid_params = [p[:5] for p in valid_params if p[-1] == True]
 
 # -3, 10, 0.1 is good
 # smaller eig bigger wavelength
-desired_eig = -2 # exact
-desired_growth = 30 # exact
+desired_eig = -5 # exact
+desired_growth = 5 # exact
 desired_width = 0.1 # kind of
 
 print('Wavelength: ', (2*np.pi/np.sqrt(-desired_eig)))
@@ -40,13 +40,18 @@ root_width = optimal[option][3]
 Dv = sigma * Du
 
 #%%
+#a, b, c, d = 49.373, -82.998, 61.178, -93.445
 a, b, c, d = 49.373, -82.998, 61.178, -93.445
-Du, Dv = 2.0394, 82.322
+
 J = parameters.non_spacial_jacobian(a, b, c, d)
+sigma = parameters.find_sigma_for_growth(J, desired_growth)
+Du = parameters.epsilon_for_eigenvalue(J, desired_eig, sigma)
+Dv = sigma * Du
+# Du, Dv = 2.0394, 82.322
 f, g = models.linear(a, b, 0, c, d, 0)
+#%%
 
 params = a, b, 0, c, d, 0, Du, Dv
-grid_size = 10
 
 #%%
 lambda_alpha, eigvals = plots.dispersion_relation_plot(params, grid_size=grid_size, plot=False,  shape = shapes.grid_check, model = models.linear)
@@ -54,12 +59,17 @@ lambda_alpha, eigvals = plots.dispersion_relation_plot(params, grid_size=grid_si
 f, g = models.linear(a, b, 0, c, d, 0)
 
 u0, v0 = parameters.find_steady_state(f, g, initial_guess=(0.0, 0.0))
-n = 2000
-grid_size = 10
+n = 50000
+grid_size = 20
 
 initial = models.initial_fill(grid_size, fill = 0, pert=True)
 
-u_vector, v_vector, (u_log, v_log) = simulation.simulation(f, g, Du, Dv, grid_size = grid_size, n = n, initial_conditions = initial, shape = shapes.grid_check)
+connection = 1.6
+#limits = [0, 65504, 0, 65504] # spots
+limits = [-65504, 0, -65504, 0] # inverse spots
+#limits = [-65504, 65504, -65504, 65504]
+
+u_vector, v_vector, (u_log, v_log) = simulation.simulation_vectorised(f, g, Du, Dv, grid_size = grid_size, n = n, initial_conditions = initial, threshold=connection)
 
 x_axis = np.arange(0, n, 1)
 plt.plot(x_axis, u_log.T)
@@ -69,6 +79,11 @@ plt.ylabel('u values')
 plt.grid(True)
 plt.show()
 
+u_grid = u_vector.reshape((grid_size, grid_size))
+wavelength = analysis.plot_wavelength_spectrum(u_grid, plot_spectrum=True, log_scale=False)
+wavelength = analysis.strongest_wavelength(u_grid, plot=False)
+
+print('wavelength: ', wavelength)
 #%%
 lambda_alpha, eigvals = plots.dispersion_relation_plot(params, grid_size=grid_size, plot=True,  shape = shapes.grid_check, model = models.linear)
 u_grid = u_vector.reshape((grid_size, grid_size))
@@ -203,7 +218,7 @@ eigenvalues = np.linspace(-12, -0, 30) #-(2*np.pi/eig_wavelengths) ** 2
 #eigenvalues, eigvecs, lambda_alpha = analysis.linear_stability(params, grid_size=10, shape = shapes.grid_check, model=models.linear)
 # log_vals = np.logspace(-2, 0, 20)
 # eigenvalues = -0.1 - (log_vals - log_vals.min()) * (grid_size - 0.1) / (log_vals.max() - log_vals.min())
-eigenvalues = np.arange(-12, -0, 0.5)
+eigenvalues = np.arange(-12, -0.5, 0.5)
 
 wavelengths = []
 std_array = []
@@ -218,7 +233,7 @@ f, g = models.linear(a, b, 0, c, d, 0)
 grid_size = 10
 # eig = -4
 n = 1800
-desired_growth = 30 # exact
+desired_growth = 30.1 # exact
 desired_width = 0.1 # kind of
 initial = models.initial_fill(grid_size, fill = 0.5, pert=True)
 sigma = parameters.find_sigma_for_growth(J, desired_growth)
@@ -234,16 +249,32 @@ sigma = parameters.find_sigma_for_growth(J, desired_growth)
 # Dv = sigma * Du
 params = a, b, 0, c, d, 0, Du, Dv
 connectivities = [1.1, 1.9, 2.1]
+#%%
 
 all_wavelengths = []
 all_powers = []
+all_eigenvalues = []
+grid_size = 10
 
-#%%
+a, b, c, d = 49.373, -82.998, 61.178, -93.445
+J = parameters.non_spacial_jacobian(a, b, c, d)
+f, g = models.linear(a, b, 0, c, d, 0)
 
 for (c, connection) in enumerate(connectivities):
     wavelengths = []
     powers = []
-    for eig in eigenvalues:
+
+    # adjacency_matrix, degree_matrix, valid_nodes = simulation.generate_nodes(threshold=connection, shape = shapes.grid_check, grid_size=grid_size)
+    # L = adjacency_matrix - degree_matrix
+
+    # # lambda_alpha values depend on params
+    # lambda_alpha, eigenvalues = plots.dispersion_relation_plot(params, grid_size=grid_size, plot=False,  threshold=connection)
+
+    # just use 25 indicies
+    #indices = [round(i * (len(eigenvalues) - 1) / 15) for i in range(15)]
+    #all_eigenvalues.append([eigenvalues[i] for i in indices[2:]])
+
+    for eig in eigenvalues: #(eigenvalues[i] for i in indices[2:]):
         if eig > -3:
             dt = 0.0001
         elif eig > -2:
@@ -258,24 +289,24 @@ for (c, connection) in enumerate(connectivities):
         for repeat in range(50):
             print(repeat)
             #grid_size = num
+
+            sigma = parameters.find_sigma_for_growth(J, desired_growth)
             Du = parameters.epsilon_for_eigenvalue(J, eig, sigma)
-            Dv = sigma * Du # choose diffusion parameters based off ideal peak - continuous
+            Dv = sigma * Du
+            params = a, b, 0, c, d, 0, Du, Dv
+            # param update !!
             initial = models.initial_fill(grid_size, fill = 0, pert=True)
-            u_vector, v_vector, (u_log, v_log) = simulation.simulation(f, g, Du, Dv, dt = dt, n = 5000, grid_size = grid_size, \
-                                                                    initial_conditions = initial, \
-                                                                    shape = shapes.grid_check, \
-                                                                    show=False, threshold=connection)
+            u_vector, v_vector, (u_log, v_log) = simulation.simulation(f, g, Du, Dv, n = 5000, grid_size = grid_size, \
+                                                                    initial_conditions = initial,
+                                                                    show=False, threshold=connection, dt=dt)
             u_grid = u_vector.reshape((grid_size, grid_size))
-            #wavelength = analysis.strongest_wavelength(u_grid, plot=False)
+            wavelength = analysis.strongest_wavelength(u_grid, plot=False)
 
-            adjacency_matrix, degree_matrix, valid_nodes = simulation.generate_nodes(threshold=connection, shape = shapes.grid_check, grid_size=grid_size)
+            #evals, power, dominant_lambda = analysis.graph_spectral_analysis(u_vector, L, k_eigs=100, plot=False)
 
-            L = adjacency_matrix - degree_matrix
-            evals, power, dominant_lambda = analysis.graph_spectral_analysis(u_vector, L, k_eigs=100, plot=False)
-
-            _, power_flat = analysis.plot_wavelength_spectrum(u_grid, plot_spectrum = False, log_scale=False)
+            #_, power_flat = analysis.plot_wavelength_spectrum(u_grid, plot_spectrum = False, log_scale=False)
             #powers_eig.append(power_flat) # len 50
-            repeat_array.append(dominant_lambda)
+            repeat_array.append(wavelength)
 
         # powers.append(powers_eig) # len 24 eigenvalues
         # in this case only len 3
@@ -288,12 +319,6 @@ for (c, connection) in enumerate(connectivities):
 
     
 #%% PLOT ALL
-
-
-# %%
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy.optimize import curve_fit
 
 # Define the fitting function
 def fit_func(x, A, B):
@@ -313,12 +338,12 @@ for i in range(3):  # Assuming 3 curves
     plt.errorbar(x, mean_vals[i], yerr=std_vals[i], label=legend_labels[i],
                  capsize=3, fmt='o', color=colors[i])
 
-    if i == 1:
-        x_line = x[:-1]
-        y_line = mean_vals[i][:-1]
-    elif i == 2:
-        x_line = x[:-4]
-        y_line = mean_vals[i][:-4]
+    if i ==2:
+        x_line = x[:-3]
+        y_line = mean_vals[i][:-3]
+    # elif i == 2:
+    #     x_line = x[:-4]
+    #     y_line = mean_vals[i][:-4]
     else:
         x_line = x
         y_line = mean_vals[i]
@@ -329,6 +354,16 @@ for i in range(3):  # Assuming 3 curves
     # Plot the fitted curve
     x_fit = np.linspace(min(x_line), max(x_line), 300)
     y_fit = fit_func(x_fit, A, B)
+
+        # R² calculation
+    y_pred = fit_func(x_line, A, B)
+    ss_res = np.sum((y_line - y_pred)**2)
+    ss_tot = np.sum((y_line - np.mean(y_line))**2)
+    r2 = 1 - ss_res / ss_tot
+
+    print(f"{legend_labels[i]}: A={A:.3f}, B={B:.3f}, R²={r2:.4f}")
+
+
     plt.plot(x_fit, y_fit, '--', color=colors[i])
 
 # Styling
@@ -346,6 +381,35 @@ plt.show()
 # A: 11.35644947957741, B: -1.2673784054802593
 # A: 22.176479363032175, B: -4.018636515087657
 
+#%% NO BEST FITS
+
+#%% GFT plot
+
+mean_vals = np.mean(all_wavelengths, axis=2)  # shape: (3, 24)
+std_vals = np.std(all_wavelengths, axis=2)    # shape: (3, 24)
+x = eigenvalues
+
+legend_labels = ['4', '8', '12']
+colors = ['tab:blue', 'tab:orange', 'tab:green']
+
+plt.figure()
+
+for i in range(3):  # Assuming 3 curves
+    # Plot error bars
+    plt.errorbar(all_eigenvalues[i], mean_vals[i], yerr=std_vals[i], label=legend_labels[i],
+                 capsize=3, fmt='o', color=colors[i])
+    
+plt.plot(x, x, '--', color='k')
+
+plt.rcParams.update({'font.size': 15})
+plt.xticks(fontsize=15)
+plt.yticks(fontsize=15)
+plt.xlabel('Dominant Turing Mode (chosen) $\Lambda_m$', fontsize=15)
+plt.ylabel('GFT Dominant Eigenmode $\ell$', fontsize=15)
+plt.grid(True)
+plt.legend(title="Connections", fontsize=15, title_fontsize=15)
+plt.tight_layout()
+plt.show()
 #%% DISPERSION DIAGRAM PLOT
 a, b, c, d = 49.373, -82.998, 61.178, -93.445
 J = parameters.non_spacial_jacobian(a, b, c, d)

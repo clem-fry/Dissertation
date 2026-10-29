@@ -110,6 +110,16 @@ plt.rcParams.update({'font.size': 22})
 #plt.legend()
 plt.tight_layout()
 plt.show()
+
+#%% COEFFICIENT OF DETERMINATION
+
+y_pred = model(np.array(unique_eigen), A_fit, B_fit)
+ss_res = np.sum((y_data - y_pred)**2)
+ss_tot = np.sum((y_data - np.mean(y_data))**2)
+r2 = 1 - ss_res / ss_tot
+
+print(f"A={A_fit:.3f}, B={B_fit:.3f}, R²={r2:.4f}")
+
 #%% CALCULATE VARIANCE
 
 cv_per_box = [np.std(group, ddof=1) / np.mean(group) for group in groups]

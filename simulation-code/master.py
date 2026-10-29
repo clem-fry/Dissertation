@@ -29,15 +29,14 @@ a, b, c, d, e, w = 8, -12.8, 4.8, 16, -9.6, -19.2 #<- some stripes
 
 f, g = models.linear(a, b, c, d, e, w)
 
-grid_size = 20 # size of the 2D grid or square root of total number of robots
+grid_size = 10 # size of the 2D grid or square root of total number of robots
 T = 30.0 # total time
 dt = 0.001 # time step
 n = int(T/dt) # number of iterations
 Du, Dv = 0.5, 10
 
-u, v, _ = simulation.simulation(f, g, Du, Dv, n=n, dt=dt, show=True)
+u, v, _ = simulation.simulation(f, g, Du, Dv, grid_size=grid_size, n=n, dt=dt, show=True, threshold=1.1)
 params = a, b, c, d, e, w, Du, Dv
-parameters.turing_check(params)
 
 # if Re(lamda(0)) > 0 the system is unstable without diffusion (bad)
 # if Re(lamda(k)) > 0 for some nonzero k, the system is unstable and can form a pattern

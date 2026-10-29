@@ -14,11 +14,12 @@ def linear(a, b, c, d, e, w):
     return f, g
 
 def gray_scott(a, b):
+    # u = autocatalyst, v = substrate, a = feed rate F, b = kill rate k (Pearson 1993)
     def f(u, v):
         return(u**2 * v - (a+b)*u)
 
     def g(u, v):
-        return(-u**2*v+a*(1+v))
+        return(-u**2*v+a*(1-v))
     
     return f, g
 
@@ -37,7 +38,28 @@ def schnakenberg(a, b):
     
     def g(u, v):
         return(b-u**2*v)
-    
+
+    return f, g
+
+def bvam(eta, a, b, h, C):
+    # Barrio-Varea-Aragon-Maini (1999): C sets the quadratic term, C = 0 -> stripes, larger C -> spots
+    def f(u, v):
+        return(eta*(u + a*v - C*u*v - u*v**2))
+
+    def g(u, v):
+        return(eta*(b*v + h*u + C*u*v + u*v**2))
+
+    return f, g
+
+def fitzhugh_nagumo(eps, a1, a0):
+    # bistable when a1 > 1: stable states u ≈ ±1/√2 either side of a saddle at u ≈ 0
+    # a0 tilts the balance between them: a0 < 0 favours low u (spots of high u), a0 > 0 the reverse
+    def f(u, v):
+        return(u - u**3 - v)
+
+    def g(u, v):
+        return(eps*(u - a1*v - a0))
+
     return f, g
 
 def initial_fill(grid_size, fill=None, pert=False):
@@ -46,7 +68,7 @@ def initial_fill(grid_size, fill=None, pert=False):
         initial.fill(fill)
 
     if pert == True:
-        initial += np.random.normal(loc=0.0, scale=1e-6, size=initial.shape)
+        initial += np.random.normal(loc=0.0, scale=1, size=initial.shape)
     return initial
 # %%
 

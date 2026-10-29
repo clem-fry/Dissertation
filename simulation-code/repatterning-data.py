@@ -40,5 +40,19 @@ for i, (name, array) in enumerate(data.items()):
     # wavelength = analysis.strongest_wavelength(array_grid, plot=False)
     # kilobot_wavelengths.append(wavelength)
     # labels_kilo.append((eigen, "Kilobot"))
+
 # %%
 
+_ = analysis.plot_wavelength_spectrum(data['repeat4_phase1'].reshape((10, 10)), plot_spectrum = True, log_scale=False)
+wavelength1 = analysis.strongest_wavelength(data['repeat4_phase1'].reshape((10, 10)), plot=False)
+print(wavelength1)
+
+_ = analysis.plot_wavelength_spectrum(data['repeat4_phase2'].reshape((10, 10)), plot_spectrum = True, log_scale=False)
+wavelength2 = analysis.strongest_wavelength(data['repeat4_phase2'].reshape((10, 10)), plot=False)
+print(wavelength2)
+
+_ = analysis.plot_wavelength_spectrum(data['repeat4_phase3'].reshape((10, 10)), plot_spectrum = True, log_scale=False)
+wavelength3 = analysis.strongest_wavelength(data['repeat4_phase3'].reshape((10, 10)), plot=False)
+print(wavelength3)
+
+# %%

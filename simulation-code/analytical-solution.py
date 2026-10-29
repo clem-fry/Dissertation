@@ -69,7 +69,7 @@ adjacency_matrix, degree_matrix, valid_nodes = simulation.generate_nodes(thresho
 L = adjacency_matrix - degree_matrix
 
 #_, power_flat = analysis.plot_wavelength_spectrum(u_array_scaled.reshape((20,20)), plot_spectrum = True, log_scale=False, normalise=True)
-_, power_flat = analysis.graph_spectral_analysis(u_array_analytic, plot = True, L=L, k_eigs=300)
+_, power_flat, dominant_lambda = analysis.graph_spectral_analysis(u_array_analytic, plot = True, L=L, k_eigs=300)
 
 # %% PLOTTING
 
@@ -111,7 +111,7 @@ plt.show()
 adjacency_matrix, degree_matrix, valid_nodes = simulation.generate_nodes(threshold=1.1, shape = shapes.grid_check, grid_size=grid_size)
 L = adjacency_matrix - degree_matrix
 
-_, power_flat = analysis.graph_spectral_analysis(u_vector_numeric, plot = True, L=L, k_eigs=300)
+_, power_flat, peak = analysis.graph_spectral_analysis(u_vector_numeric, plot = True, L=L, k_eigs=300)
 
 
 # %% 

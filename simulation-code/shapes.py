@@ -1,5 +1,7 @@
 import numpy as np
 
+mask_nodes = None
+
 def grid_check(r, coords):
     grid_size = r*2
     if np.ndim(coords) == 1:

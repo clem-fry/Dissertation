@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import shapes # grid_check, circle_outline_check, heart_outline_check
 import models
 import random
+from scipy.sparse import bmat, eye, csr_matrix
 
 #threshold = 1.5 # what counts as a neighbour?
 dt = .001 # time step
@@ -19,14 +20,6 @@ class Node:
         self.v = v
 
         self.neighbours = []
-
-    def update_u(self, laplacian): # NOT USED
-        dudt = f(self.u, self.v) + laplacian[int(self.id)]
-        self.u = dudt * dt + self.u
-    
-    def update_v(self, laplacian): # NOT USED
-        dvdt = g(self.u, self.v) + laplacian[int(self.id)]
-        self.v  = dvdt * dt + self.v
         
     def update_coordinates(self, new_x, new_y): # NOT USED
         self.x = new_x
@@ -82,15 +75,15 @@ def laplacian(degree_matrix, adjacency_matrix, c):
 
 # define the linear term:
 
-Du = 0.1; Dv = 50
+# Du = 0.1; Dv = 50
 
-a, b, c= 1, 0.5, 1
-f, g = models.geirer_meinhardt(a, b, c)
+# a, b, c= 1, 0.5, 1
+# f, g = models.geirer_meinhardt(a, b, c)
 
 #%%
-grid_size = 20 # size of the 2D grid or square root of total number of robots
-T = 10.0 # total time
-n = int(T/dt) # number of iterations
+# grid_size = 20 # size of the 2D grid or square root of total number of robots
+# T = 10.0 # total time
+# n = int(T/dt) # number of iterations
 
 # Create evenly spaced coordinates for x and y across the grid
 # x_coords = np.linspace(-1, 1, grid_size) # threshold 1.5 gives circles
@@ -156,10 +149,9 @@ def shape_nodes(shape_check, grid_size, initial_conditions):
     initial_index = 0
     for y in y_coords:
         for x in x_coords:
-            u = initial_conditions[initial_index, 0] # np.random.rand()  # Random u value between 0 and 1
-            v = initial_conditions[initial_index, 1] #np.random.rand()  # Random v value between 0 and 1
-            
             if shape_check(r, (x, y)): # if in shape
+                u = initial_conditions[initial_index, 0] # one row per in-shape node
+                v = initial_conditions[initial_index, 1]
                 node = Node(id=node_id, x=x, y=y, u=u, v=v)
                 all_nodes[node.x -1, node.y -1] = node
                 neighbours = np.array([(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)])
@@ -239,8 +231,8 @@ def simulation(f, g, Du, Dv, grid_size=20, n = 10000, dt = 0.001, initial_condit
         new_u = dudt * dt + u_vector # simulate discretisation of kilobots 
         new_v = dvdt * dt + v_vector
 
-        new_u = np.clip(new_u, -65504, 65504)
-        new_v = np.clip(new_v, -65504, 65504)
+        new_u = np.clip(new_u, -100, 100) #65504)
+        new_v = np.clip(new_v, -100, 100)
 
         for node in valid_nodes:
             if node == None:
@@ -275,6 +267,96 @@ def simulation(f, g, Du, Dv, grid_size=20, n = 10000, dt = 0.001, initial_condit
 
     return u_vector, v_vector, (u_log, v_log)
 
-#simulation(n, f, g)
+def simulation_vectorised(f, g, Du, Dv, grid_size=20, n = 10000, dt = 0.001, initial_conditions = 'rand', shape = shapes.grid_check, show=True, save=False, save_path="simulation_final.png", threshold = None, limits = None):
+    step_plot = max(1, n // 9)
+    logs = 0
+
+    adjacency_matrix, degree_matrix, valid_nodes = generate_nodes(threshold, shape, grid_size, initial_conditions)
+    coord_to_index = {(int(node.x), int(node.y)): i for i, node in enumerate(valid_nodes)}
+
+    N = len(valid_nodes)
+    log_every = 10
+    log_idx = 0
+    
+    u_log = np.empty((N,  n), dtype=np.float32)
+    v_log = np.empty((N,  n ), dtype=np.float32) #// log_every + 1
+
+    L = csr_matrix(adjacency_matrix - degree_matrix)
+
+    u_vector = np.array([float(node.u) for node in valid_nodes])
+    v_vector = np.array([float(node.v) for node in valid_nodes])
+
+    if show:
+        fig, axes = plt.subplots(3, 3, figsize=(8, 8))
+
+        # coord_to_index = {
+        #     (int(node.x), int(node.y)): i
+        #     for i, node in enumerate(valid_nodes)
+        # }
+
+    for i in range(n):
+        if i % 1000 == 0 and show:
+            print(i)
+        
+        Lu = L @ u_vector
+        Lv = L @ v_vector
+        
+        # i have moved du dv coefficients into dudt and dvdt instead of new_u and new_v
+        dudt = f(u_vector, v_vector) + Du * Lu
+        dvdt = g(u_vector, v_vector) + Dv * Lv
+
+        # new_u = np.round(dudt * dt, 3) + u_vector # simulate discretisation of kilobots 
+        # new_v = np.round(dvdt* dt, 3) + v_vector
+
+        u_vector += np.real(dudt) * dt # simulate discretisation of kilobots 
+        v_vector += np.real(dvdt) * dt 
+
+        if limits == None:
+            np.clip(u_vector, -65504, 65504, out=u_vector)
+            np.clip(v_vector, -65504, 65504, out=v_vector)
+
+        else:
+            np.clip(u_vector, limits[0],  limits[1], out=u_vector)
+            np.clip(v_vector,  limits[2],  limits[3], out=v_vector)
+
+        if i % 100 == 0:
+            if not np.isfinite(u_vector).all() or not np.isfinite(v_vector).all():
+                print('blow up detected')
+                return u_vector, v_vector
+
+        if i % step_plot == 0 and i < 9 * step_plot and show:
+            for node in valid_nodes:
+                if node == None:
+                    continue
+                node_index = coord_to_index[(int(node.x), int(node.y))]
+                node.u = u_vector[node_index]
+                node.v = v_vector[node_index]
+            ax = axes.flat[i // step_plot]
+            plot_nodes(valid_nodes, ax=ax, i=i)
+            #easy_plot(valid_nodes)
+
+        # if i % 10 == 0:
+        #     logs += 1
+        u_log[:, i] = u_vector
+        v_log[:, i] = v_vector
+
+    # for idx, node in enumerate(valid_nodes):
+    #     node.u = u_vector[idx]
+    #     node.v = v_vector[idx]
+
+    if save:
+        # Create a single figure and axis for final plot
+        fig, ax = plt.subplots(figsize=(6, 6))
+        plot_nodes(valid_nodes, ax=ax, i=n, save=True)
+        plt.tight_layout()
+        plt.savefig(save_path)
+        plt.close(fig)
+        print(f"Simulation final plot saved to {save_path}")
+
+    elif show:
+        plt.tight_layout()
+        plt.show()
+
+    return u_vector, v_vector, (u_log, v_log)
 # %%
 
