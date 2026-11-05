@@ -267,11 +267,14 @@ def simulation(f, g, Du, Dv, grid_size=20, n = 10000, dt = 0.001, initial_condit
 
     return u_vector, v_vector, (u_log, v_log)
 
-def simulation_vectorised(f, g, Du, Dv, grid_size=20, n = 10000, dt = 0.001, initial_conditions = 'rand', shape = shapes.grid_check, show=True, save=False, save_path="simulation_final.png", threshold = None, limits = None):
+def simulation_vectorised(f, g, Du, Dv, grid_size=20, n = 10000, dt = 0.001, initial_conditions = 'rand', shape = shapes.grid_check, show=True, save=False, save_path="simulation_final.png", threshold = None, limits = None, network = None):
+    # network: optional (adjacency_matrix, degree_matrix, valid_nodes) to use instead of building one from shape/threshold
     step_plot = max(1, n // 9)
     logs = 0
 
-    adjacency_matrix, degree_matrix, valid_nodes = generate_nodes(threshold, shape, grid_size, initial_conditions)
+    if network is None:
+        network = generate_nodes(threshold, shape, grid_size, initial_conditions)
+    adjacency_matrix, degree_matrix, valid_nodes = network
     coord_to_index = {(int(node.x), int(node.y)): i for i, node in enumerate(valid_nodes)}
 
     N = len(valid_nodes)

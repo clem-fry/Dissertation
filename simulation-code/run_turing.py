@@ -26,13 +26,16 @@ ADDING A NEW MODEL
     3. Set cfg.model = 'brusselator'.
 """
 
+import copy
 import importlib
 from dataclasses import dataclass, field
 
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
-from scipy import ndimage
+from scipy import ndimage, signal
+from scipy.sparse.csgraph import connected_components
+from scipy.spatial.distance import cdist
 
 import simulation
 import models
@@ -46,30 +49,94 @@ for module in (simulation, models, parameters, analysis, shapes):
 plt.rcParams.update({'font.size': 11})  # plots.py (imported by analysis) sets this to 20
 
 #%% MODELS
+
+@dataclass
+class ModelSpec:
+    factory: callable          # factory(**params) -> (f, g)
+    params: dict               # default kinetic parameters
+    guess: tuple = (1.0, 1.0)  # starting point for the steady-state solver
+    phase_range: tuple = ((0.01, 3), (0.01, 3))  # (u_range, v_range) for the no-diffusion phase plane
+    param_plane: tuple = None  # (x_param, x_range, y_param, y_range) for the parameter-plane map
+    pattern_sweep: tuple = None  # (param, values) swept in cell 13 to watch the pattern type change
+    diffusion: tuple = None    # fixed (Du, Dv) for models that aren't designed from a target mode (e.g. bistable)
+    start: str = 'stable'      # 'stable': noise around a stable fixed point (Turing)
+                               # 'saddle': noise around the saddle between two stable states (bistable domains)
+    seed_patch: tuple = None   # (u, v) inside a seeded patch when start_seed's amplitude is None
+    behaviour_map: tuple = None  # (x_param, x_values, y_param, y_values) simulated in cell 16
+
+MODELS = {
+    # f = a u + b v + c,  g = d u + e v + w   (steady state at 0, saturates via clipping)
+    'linear': ModelSpec(models.linear,
+                        dict(a=49.373, b=-82.998, c=0, d=61.178, e=-93.445, w=0), guess=(0.0, 0.0),
+                        phase_range=((-2, 2), (-2, 2))),
+    # f = a - u + u²v,  g = b - u²v
+    'schnakenberg': ModelSpec(models.schnakenberg, dict(a=0.1, b=0.9),
+                              param_plane=('a', (0.0, 1.0), 'b', (0.0, 2.0))),
+    # f = a - b u + u²/v,  g = u² - c v
+    'gierer_meinhardt': ModelSpec(models.geirer_meinhardt, dict(a=0.1, b=1.0, c=0.9),
+                                  param_plane=('a', (0.0, 1.0), 'c', (0.05, 2.0))),
+    # f = η(u + a v - C u v - u v²),  g = η(b v + h u + C u v + u v²)
+    # C is the only quadratic term: C = 0 -> stripes, increasing C -> spots (Barrio et al. 1999)
+    'bvam': ModelSpec(models.bvam, dict(eta=1.0, a=1.112, b=-1.01, h=-1.0, C=0.0), guess=(0.0, 0.0),
+                      phase_range=((-1, 1), (-1, 1)), param_plane=('b', (-1.5, -0.8), 'a', (0.8, 1.6)),
+                      pattern_sweep=('C', (0.0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0))),
+    # f = u - u³ - v,  g = ε(u - a1 v - a0)   bistable, NOT Turing: both stable states have fu < 0.
+    # Nodes fall to either side of the saddle; the fast inhibitor (Dv >> Du) stops the domains coarsening.
+    # The pattern depends on where you start, not just the kinetics: starting exactly at the saddle
+    # gives a labyrinth, a small start_offset towards one state gives spots of the other, a larger
+    # one (|offset| >~ 0.015) sends the whole domain to one state. Set Dv = 0 to watch domains coarsen.
+    'fitzhugh_nagumo': ModelSpec(models.fitzhugh_nagumo, dict(eps=0.5, a1=2.0, a0=0.0), guess=(0.0, 0.0),
+                                 phase_range=((-1.5, 1.5), (-1, 1)), diffusion=(0.1, 2.0), start='saddle',
+                                 pattern_sweep=('start_offset', (-0.01, -0.005, -0.0025, 0.0, 0.0025, 0.005, 0.01))),
+    # f = u²v - (a+b)u,  g = -u²v + a(1 - v)   Gray-Scott: a = feed F, b = kill k. NOT Turing: the only
+    # fixed point (u, v) = (0, 1) is stable to every mode. A seeded patch of autocatalyst grows, its
+    # middle starves of substrate, and it splits - spots keep dividing until they fill the domain.
+    # Diffusion is Pearson's (Dv = 2 Du) scaled to the 8-neighbour graph. Slow: needs T ~ 4000 with dt = 1.
+    # a = 0.03, b = 0.062 divides steadily; a = 0.025, b = 0.06 is close to the oscillatory regime (spots
+    # breathe and some die), a = 0.03, b = 0.06 grows worms instead of spots.
+    'gray_scott': ModelSpec(models.gray_scott, dict(a=0.03, b=0.062), guess=(0.0, 1.0),
+                            phase_range=((0, 0.6), (0, 1.1)), diffusion=(0.035, 0.07), seed_patch=(0.25, 0.5),
+                            pattern_sweep=('b', (0.056, 0.058, 0.060, 0.062, 0.064, 0.066)),
+                            behaviour_map=('b', (0.045, 0.05, 0.055, 0.06, 0.065, 0.07),
+                                           'a', (0.01, 0.02, 0.03, 0.04, 0.05, 0.06))),
+}
+
+#%% CONFIG
+
 @dataclass
 class Config:
     model: str = 'gray_scott'
     model_params: dict = field(default_factory=dict)  # overrides MODELS[model].params
     # pattern design (used when Du, Dv are None)
     target_mode: float = -0.1    # Λ_m: more negative -> shorter wavelength
-    target_growth: float = 0.5   # λ_m: must be below the model's maximum (an error says if not)
+    target_growth: float = 0.1   # λ_m: must be below the model's maximum (an error says if not)
     Du: float = None
     Dv: float = None
     # network / domain
-    grid_size: int = 10
-    threshold: float = 1.1       # connection radius: 1.1 -> 4 neighbours, 1.5/1.6 -> 8, 2.1 -> 12
+    grid_size: int = 30
+    threshold: float = 1      # connection radius: 1.1 -> 4 neighbours, 1.5/1.6 -> 8, 2.1 -> 12
     shape: callable = shapes.grid_check
+    # irregularities (an imperfect swarm) - all 0 -> regular lattice
+    position_jitter: float = 0.0   # std of random node displacement (grid spacings); links then use the moved positions
+    missing_nodes: float = 0.0     # fraction of nodes removed at random (holes / dead robots)
+    edge_dropout: float = 0.0      # fraction of links removed at random (failed communication)
+    network_seed: int = 20          # same seed -> same irregular network in every run and sweep
     # integration
     T: float = 4000              # None -> 20 e-folds of the predicted growth rate
     dt: float = 1
     initial_noise: float = 0.01   # std of random perturbation around the steady state
     start_offset: float = 0.0     # uniform shift of the initial u (biases a bistable start towards one state)
+    allow_oscillatory: bool = True  # True: start at the steady state even if it is an unstable spiral, so the
+                                     # modes near Λ = 0 (complex, oscillatory) grow - Hopf / wave instabilities.
+                                     # False: swap to a stable fixed point, or stop if there is none
     start_seed: tuple = (1, None, shapes.heart_outline_check)  # needs the ': tuple' to be a Config field
                                   # (radius, amplitude): instead of noise, a uniform state with a disc of raised u
                                   # in the centre. amplitude None -> 0.5·max(|u0|, 1), or for bistable models
                                   # the low stable state with a disc of the high one. See cell 14.
                                   # Optional 3rd entry: a shape from shapes.py instead of a disc, e.g.
                                   # (12, None, shapes.heart_outline_check) - radius is then half its width.
+    seed_centre: tuple = None     # (x, y) grid position of the seed, None -> middle of the grid. Needed for
+                                  # domains with a hole there (shapes.ring_check, shapes.horseshoe_check)
     limits: tuple = None         # (u_min, u_max, v_min, v_max) clipping, None -> ±65504
     seed: int = 0
     n_repeats: int = 10          # seeds for the robustness check (cell 11)
@@ -81,12 +148,40 @@ class Config:
                                     # Aim for ~20 frames per oscillation: (t_end - t_start) / n_frames ≈ period / 20
     animation_fps: int = 20      # playback speed: lower -> slower, easier to follow
     animation_path: str = "animation.mp4"   # e.g. 'pattern.mp4' or 'pattern.gif' to save it; None -> only show inline
+    sample_nodes: int = 6        # nodes whose u(t) is traced in cell 15, picked from the centre out to the edge
+    cut_nodes: int = 0           # > 0: after the main run, remove this many robots at the bottom of the ring and
+                                 # keep running (ring -> horseshoe, cell 15b). 1 opens a one-wide ring.
+    cut_T: float = None          # how long to run after the cut, None -> same as T
 
 # oscillating Gray-Scott on a 10×10 grid: diffusion scaled ×0.15 so the breathing pattern fits, and a small
 # seed (radius 3) so the domain doesn't tip into the uniform red state. Narrow window - see notes below.
-cfg = Config(model='gray_scott', model_params={'a': 0.02, 'b': 0.05},
-             Du=0.035*0.4, Dv=0.07*0.4, grid_size=10, start_seed=(3, None), T=10000, dt=1.0,
-             animation_window=(4000, 6000), n_frames=200, animation_fps=15) 
+# cfg = Config(model='gray_scott', model_params={'a': 0.02, 'b': 0.05},
+#              Du=0.035*0.4, Dv=0.07*0.4, grid_size=30, start_seed=(3, None), T=10000, dt=1.0,
+#              animation_window=(4000, 6000), n_frames=200, animation_fps=15)
+
+# Schnakenberg Turing spots on a ring / horseshoe: starts from noise, so no seed (start_seed=None).
+# target_mode -1 -> spots ~6 nodes apart, 2-3 across the band; -2.5 shrinks them to single nodes (too fine).
+# cfg = Config(model='schnakenberg', shape=shapes.ring_check, grid_size=40, threshold=1.6, target_mode=-1.0,
+#              start_seed=None, T=None, dt=0.005)
+# Ring one robot wide (108 robots on a 40 grid): threshold = robots linked each side along the loop (whole
+# numbers only: 1.1-1.9 -> 1). Spots are 1 robot wide, ~8 apart; target_mode=-0.3 -> ~2 wide, further apart.
+cfg = Config(model='schnakenberg', shape=shapes.ring_line_check, grid_size=5, target_mode=-1.0,
+             start_seed=None, T=None, dt=0.005, cut_nodes=1)  # cut_nodes: open it into a horseshoe once developed
+# cfg = Config(model='schnakenberg', shape=shapes.horseshoe_line_check, grid_size=40, target_mode=-1.0,
+#              start_seed=None, T=None, dt=0.005)  # open chain, two free ends
+# cfg = Config(model='schnakenberg', shape=shapes.horseshoe_check, grid_size=40, threshold=1.6, target_mode=-1.0,
+#              start_seed=None, T=None, dt=0.005)
+
+# Oscillatory: b = 0.5 makes the steady state an unstable spiral, so modes near Λ = 0 oscillate and grow.
+# Du = Dv: no Turing instability -> rotating waves, every node oscillates with period ≈ 12.4.
+# cfg = Config(model='schnakenberg', model_params={'a': 0.1, 'b': 0.5}, allow_oscillatory=True, Du=0.1, Dv=0.1,
+#              grid_size=30, threshold=1.6, start_seed=None, T=150, dt=0.005, animation_window=(100, 150))
+# Same on the one-wide ring (108 robots): 45 oscillatory modes grow -> waves travel round the loop.
+# cfg = Config(model='schnakenberg', model_params={'a': 0.1, 'b': 0.5}, allow_oscillatory=True, Du=0.1, Dv=0.1,
+#              shape=shapes.ring_line_check, grid_size=40, start_seed=None, T=150, dt=0.003, animation_window=(100, 150))
+# Designed Du, Dv (Dv/Du ≈ 76) instead: Turing-Hopf - stationary modes grow faster (0.5 vs 0.15), spots win.
+# cfg = Config(model='schnakenberg', model_params={'a': 0.1, 'b': 0.5}, allow_oscillatory=True, target_mode=-1.0,
+#              grid_size=30, threshold=1.6, start_seed=None, T=None, dt=0.005)
 
 #%% 1. MODEL: steady state & Jacobian
 
@@ -136,8 +231,11 @@ def build_model(cfg):
     u0, v0 = parameters.find_steady_state(f, g, initial_guess=spec.guess)
     J = numerical_jacobian(f, g, u0, v0)
     stable_states = []
+    start = spec.start
+    if cfg.allow_oscillatory and spec.start == 'stable' and classify(J) == 'unstable spiral':
+        start = 'oscillatory'  # keep it: the uniform state oscillates with growing amplitude (Hopf)
 
-    if spec.start == 'saddle' or not classify(J).startswith('stable'):
+    if start == 'stable' and not classify(J).startswith('stable') or start == 'saddle':
         points = [(x, numerical_jacobian(f, g, *x)) for x in find_fixed_points(f, g, *spec.phase_range)]
         stable_states = [x for x, Jx in points if classify(Jx).startswith('stable')]
         candidates = [(x, Jx) for x, Jx in points
@@ -147,12 +245,13 @@ def build_model(cfg):
                              f"{len(stable_states)} stable fixed point(s) in {spec.phase_range}.")
         if not candidates:
             raise ValueError(f"{cfg.model} has no stable fixed point in {spec.phase_range} "
-                             f"(the one at ({u0:.3g}, {v0:.3g}) is a {classify(J)}), so it cannot form a Turing pattern.")
+                             f"(the one at ({u0:.3g}, {v0:.3g}) is a {classify(J)}), so it cannot form a Turing pattern."
+                             + (" Set allow_oscillatory=True to start there anyway." if classify(J) == 'unstable spiral' else ''))
         (u0, v0), J = min(candidates, key=lambda c: np.linalg.norm(c[0] - np.array(spec.guess)))
 
     return {'name': cfg.model, 'params': kinetic_params, 'f': f, 'g': g,
             'steady_state': np.array([u0, v0]), 'J': J, 'kind': classify(J),
-            'start': spec.start, 'stable_states': stable_states}
+            'start': start, 'stable_states': stable_states}
 
 
 model = build_model(cfg)
@@ -190,7 +289,7 @@ def design_diffusion(cfg, model):
     if J[0, 0] <= 0:
         print(f"Note: fu = {J[0, 0]:.3g} <= 0, so {cfg.model} has no Turing instability at this state - "
               "any pattern comes from the nonlinear dynamics (e.g. a seeded start).")
-    elif not parameters.turing_check(J, sigma)[1]:
+    elif not parameters.turing_check(J, sigma)[1] and model['start'] != 'oscillatory':  # Hopf modes grow anyway
         print(f"WARNING: σ = Dv/Du = {sigma:.2f} is below the critical ratio {critical_sigma:.2f}; "
               "no mode is unstable, so expect no pattern.")
 
@@ -213,7 +312,7 @@ def seed_background(model):
 
 def initial_state(cfg, model):
     """Steady state plus noise - same noise as models.initial_fill(pert=True) in the other scripts, but seeded.
-    With cfg.start_seed: no noise, just a disc of raised u in the middle of the domain."""
+    With cfg.start_seed: no noise, just a disc of raised u in the mixddle of the domain."""
     if cfg.start_seed is not None:
         radius, amplitude, *seed_shape = cfg.start_seed
         background, patch = seed_background(model)
@@ -221,8 +320,8 @@ def initial_state(cfg, model):
             amplitude = 0.5 * max(abs(background[0]), 1) if amplitude is None else amplitude
             patch = background + np.array([amplitude, 0.0])
         index = np.arange(cfg.grid_size ** 2)  # same ordering as simulation.shape_nodes: x fastest
-        centre = (cfg.grid_size + 1) / 2
-        x, y = index % cfg.grid_size + 1 - centre, index // cfg.grid_size + 1 - centre
+        cx, cy = cfg.seed_centre or ((cfg.grid_size + 1) / 2,) * 2
+        x, y = index % cfg.grid_size + 1 - cx, index // cfg.grid_size + 1 - cy
         if seed_shape:  # a shapes.py check(r, coords), which draws its shape in [1, 2r]: shift it to the centre
             inside = np.asarray(seed_shape[0](radius, np.column_stack([x + radius, y + radius])), dtype=bool)
         else:
@@ -246,12 +345,61 @@ def build_network(cfg, model):
 
     A, D, nodes = simulation.generate_nodes(threshold=cfg.threshold, shape=cfg.shape,
                                             grid_size=cfg.grid_size, initial_conditions=initial)
+    A = chain_links(cfg, A, nodes)
+    A, nodes = add_irregularities(cfg, A, nodes)
+    D = np.diag(A.sum(axis=0))
     eigvals, eigvecs = np.linalg.eigh(A - D)  # ascending: most negative (shortest wavelength) first
 
-    return {'initial': initial,
-            'xy': np.array([(node.x, node.y) for node in nodes], dtype=int),
+    return {'initial': np.array([(node.u, node.v) for node in nodes]),
+            'xy': np.array([(node.x, node.y) for node in nodes], dtype=int),  # lattice cell, for plotting
+            'network': (A, D, nodes),
             'eigvals': eigvals, 'eigvecs': eigvecs,
-            'mean_degree': np.diag(D).mean()}
+            'mean_degree': np.diag(D).mean(),
+            'n_components': connected_components(A, directed=False)[0],
+            'isolated': int((np.diag(D) == 0).sum())}
+
+
+def chain_type(cfg):
+    """'closed' / 'open' for one-robot-wide shapes (see chain_links), None for ordinary lattice shapes."""
+    return getattr(cfg.shape, 'chain', None) or getattr(getattr(cfg.shape, 'func', None), 'chain', None)  # func: partial
+
+
+def chain_links(cfg, A, nodes, chain=None):
+    """Shapes marked chain = 'closed' / 'open' (shapes.ring_line_check, shapes.horseshoe_line_check) are a single
+    line of robots, treated as evenly spaced: each links to the robots within cfg.threshold steps along the line
+    (1.1-1.9 -> 1 each side, 2.1 -> 2, 3.1 -> 3), instead of by distance on the lattice (whose stair-step
+    corners would give uneven links). chain overrides the shape's own type (cell 15b reopens a cut ring)."""
+    chain = chain or chain_type(cfg)
+    if chain is None:
+        return A
+    xy = np.array([(node.x, node.y) for node in nodes], dtype=float) - (cfg.grid_size + 1) / 2
+    order = np.argsort(np.arctan2(xy[:, 0], -xy[:, 1]) % (2 * np.pi))  # round the circle, starting at the bottom
+    n, reach = len(order), max(1, int(cfg.threshold))
+    A = np.zeros_like(A)
+    for step in range(1, min(reach, n // 2 if chain == 'closed' else n - 1) + 1):
+        ends = n if chain == 'closed' else n - step
+        for k in range(ends):
+            i, j = order[k], order[(k + step) % n]
+            A[i, j] = A[j, i] = 1
+    return A
+
+
+def add_irregularities(cfg, A, nodes):
+    """Jitter positions (and reconnect within cfg.threshold), remove nodes, drop links. Plots keep the lattice cells."""
+    rng = np.random.default_rng(cfg.network_seed)
+    if cfg.position_jitter > 0:
+        xy = np.array([(node.x, node.y) for node in nodes], dtype=float)
+        xy += rng.normal(scale=cfg.position_jitter, size=xy.shape)
+        A = (cdist(xy, xy) < cfg.threshold).astype(float)
+        np.fill_diagonal(A, 0)
+    if cfg.missing_nodes > 0:
+        keep = rng.random(len(nodes)) >= cfg.missing_nodes
+        A, nodes = A[np.ix_(keep, keep)], [node for node, k in zip(nodes, keep) if k]
+    if cfg.edge_dropout > 0:
+        i, j = np.triu_indices_from(A, k=1)
+        drop = (A[i, j] > 0) & (rng.random(len(i)) < cfg.edge_dropout)
+        A[i[drop], j[drop]] = A[j[drop], i[drop]] = 0
+    return A, nodes
 
 
 def growth_rates(model, diffusion, Lambda):
@@ -276,12 +424,18 @@ def predict_behaviour(eigvals, leading, tol=1e-9):
     if not unstable.any():
         return 'no pattern (returns to uniform)'
     uniform = unstable & (np.abs(eigvals) < tol)
-    if uniform.any():
-        if (np.abs(leading.imag[uniform]) > tol).any():
-            return 'Hopf: whole domain oscillates'
+    oscillating = unstable & (np.abs(leading.imag) > tol)
+    stationary = unstable & ~oscillating
+    if uniform.any() and not oscillating[uniform].any():
         return 'saddle: nodes fall to either stable state -> domains and fronts (not Turing)'
-    if (np.abs(leading.imag[unstable]) > tol).any():
-        return 'wave instability (oscillating pattern)'
+    if oscillating.any() and stationary.any():
+        fast_osc, fast_stat = leading.real[oscillating].max(), leading.real[stationary].max()
+        winner = 'stationary pattern likely wins' if fast_stat > fast_osc else 'oscillation likely wins'
+        return (f"Turing-Hopf: stationary (λ = {fast_stat:.2g}) and oscillatory (λ = {fast_osc:.2g}) "
+                f"modes both grow - {winner}")
+    if oscillating.any():
+        return 'Hopf: whole domain oscillates (waves, from a noisy start)' if uniform.any() \
+            else 'wave instability (oscillating pattern)'
     return 'stationary Turing pattern'
 
 
@@ -295,14 +449,29 @@ def check_timestep(cfg, model, diffusion, net):
 
 
 net = build_network(cfg, model)
+if net['n_components'] > 1:
+    print(f"WARNING: the network has split into {net['n_components']} disconnected pieces "
+          f"({net['isolated']} isolated nodes) - each evolves on its own. Lower missing_nodes / edge_dropout.")
 if cfg.start_seed is not None:
     seed_fraction = np.any(net['initial'] != seed_background(model)[0] + np.array([cfg.start_offset, 0.0]), axis=1).mean()
     if seed_fraction > 0.5:
         print(f"WARNING: the seeded patch covers {seed_fraction:.0%} of the domain - it has no room to spread or "
               "divide (Gray-Scott starves and dies). Shrink start_seed's radius or increase grid_size.")
-growth = growth_rates(model, diffusion, net['eigvals'])
+    if seed_fraction == 0:
+        print("WARNING: the seeded patch lies outside the domain (e.g. in the hole of a ring), so nothing is "
+              "seeded. Move it onto the domain with seed_centre=(x, y).")
+growth =growth_rates(model, diffusion, net['eigvals'])
 leading = mode_eigenvalues(model['J'], diffusion['Du'], diffusion['Dv'], net['eigvals'])[0]
 prediction = predict_behaviour(net['eigvals'], leading)
+if cfg.allow_oscillatory and model['start'] != 'oscillatory':
+    print(f"Note: allow_oscillatory has no effect - the steady state is a {model['kind']}, so every oscillatory "
+          "mode decays (Re λ <= tr(J)/2 < 0). Change model_params to make it an unstable spiral, "
+          "e.g. Schnakenberg b = 0.5.")
+complex_modes = np.abs(leading.imag) > 1e-9
+if model['start'] == 'oscillatory' and not complex_modes[np.abs(net['eigvals']) > 1e-9].any():
+    print("Note: only the uniform mode (Λ = 0) falls in the oscillatory region - the network's nearest mode "
+          f"(Λ = {net['eigvals'][np.abs(net['eigvals']) > 1e-9].max():.3g}) is past it. Add robots (grid_size) "
+          "or bring Dv/Du closer to 1 (Du = Dv makes every mode oscillatory).")
 check_timestep(cfg, model, diffusion, net)
 
 if cfg.T is None:
@@ -315,8 +484,7 @@ def run(cfg, model, diffusion, net, n_steps):
     out = simulation.simulation_vectorised(
         model['f'], model['g'], diffusion['Du'], diffusion['Dv'],
         grid_size=cfg.grid_size, n=n_steps, dt=cfg.dt,
-        initial_conditions=net['initial'].copy(), shape=cfg.shape,
-        threshold=cfg.threshold, limits=cfg.limits, show=False)
+        limits=cfg.limits, show=False, network=net['network'])
 
     if len(out) == 2:  # simulation_vectorised returns only (u, v) on blow-up
         raise RuntimeError("Simulation blew up - reduce dt (see any timestep warning above).")
@@ -473,7 +641,13 @@ def summary(cfg, model, diffusion, net, res, prediction, leading):
     critical = (f", critical {diffusion['critical_sigma']:.2f}" if np.isfinite(diffusion['critical_sigma']) else '')
     print(f"  Diffusion    Du = {diffusion['Du']:.4g}, Dv = {diffusion['Dv']:.4g}  "
           f"(σ = {diffusion['sigma']:.2f}{critical}, {'designed' if diffusion['designed'] else 'fixed'})")
-    print(f"  Network      {len(net['xy'])} nodes, {net['mean_degree']:.1f} neighbours on average")
+    irregular = ', '.join(f"{name} {getattr(cfg, name):g}" for name in ('position_jitter', 'missing_nodes', 'edge_dropout')
+                          if getattr(cfg, name) > 0)
+    print(f"  Network      {len(net['xy'])} nodes, {net['mean_degree']:.1f} neighbours on average"
+          + (f"  (irregular: {irregular})" if irregular else ''))
+    if chain_type(cfg):
+        print(f"               {chain_type(cfg)} chain: threshold {cfg.threshold} -> linked to {max(1, int(cfg.threshold))} "
+              "robot(s) each side along the line (only whole numbers matter: 1.1-1.9 are all 1)")
     print(f"  Run          T = {cfg.T:.3g}, dt = {cfg.dt}")
     print('-' * 60)
     print(f"  {'':<20}{'target':>10}{'prediction':>14}{'measured':>12}")
@@ -503,6 +677,46 @@ summary(cfg, model, diffusion, net, res, prediction, leading)
 
 #%% 7. DASHBOARD
 
+def plot_dispersion(ax, cfg, model, diffusion, net, growth, res, leading):
+    """Growth rate of every Laplacian mode: the continuous curve, the network's own modes (red = unstable),
+    and the target and measured dominant modes."""
+    eigvals = net['eigvals']
+    show_target = diffusion['designed'] and cfg.target_mode is not None
+    # extra points near Λ = 0, where the curve dips sharply while the eigenvalues are a complex pair
+    Lambda = np.unique(np.concatenate([np.linspace(eigvals.min() * 1.05, 0, 400),
+                                       -np.geomspace(1e-4, abs(eigvals.min()) * 1.05 + 1e-4, 400)]))
+    lam = mode_eigenvalues(model['J'], diffusion['Du'], diffusion['Dv'], Lambda)[0]
+    complex_pair = np.abs(lam.imag) > 1e-9
+    ax.plot(Lambda, lam.real, color='0.6', lw=1.5, label='continuous')
+    if complex_pair.any():
+        ax.plot(Lambda, np.where(complex_pair, lam.real, np.nan), color='tab:orange', lw=2.5,
+                label='complex pair (Re λ: decaying oscillation)' if lam.real[complex_pair].max() < 0
+                else 'complex pair (Re λ: oscillation)')
+    ax.scatter(eigvals, growth, c=np.where(growth > 0, 'tab:red', 'tab:blue'), s=14, zorder=3,
+               label='network modes')
+    oscillatory = (growth > 0) & (np.abs(leading.imag) > 1e-9)
+    if oscillatory.any():
+        ax.scatter(eigvals[oscillatory], growth[oscillatory], s=60, facecolors='none', edgecolors='k',
+                   zorder=4, label='oscillatory (Im λ ≠ 0)')
+    ax.axhline(0, color='k', lw=0.8)
+    if show_target:
+        ax.axvline(cfg.target_mode, color='tab:green', ls='--', label=f'target Λ_m = {cfg.target_mode}')
+    ax.axvline(res['measured_mode'], color='tab:purple', ls=':', lw=2,
+               label=f"measured Λ = {res['measured_mode']:.2f}")
+    dip = lam.real[complex_pair].min() if complex_pair.any() else np.inf  # always show the complex section
+    if growth.max() > 0:
+        top = growth.max()
+        bottom = min(max(growth.min(), -3 * top), dip)
+        ax.set_ylim(bottom - 0.05 * (top - bottom), 1.5 * top)
+    else:  # every mode decays: show them all, with some room above zero
+        bottom = min(growth.min(), dip)
+        ax.set_ylim(1.1 * bottom, -0.2 * bottom)
+    ax.set_xlabel('Laplacian eigenvalue Λ')
+    ax.set_ylabel('Growth rate Re(λ)')
+    ax.set_title('Dispersion relation (red = unstable)')
+    ax.legend(fontsize=9, loc='lower left')
+
+
 def dashboard(cfg, model, diffusion, net, sim, growth, res, leading):
     eigvals = net['eigvals']
     u0 = model['steady_state'][0]
@@ -531,30 +745,8 @@ def dashboard(cfg, model, diffusion, net, sim, growth, res, leading):
     im = show_pattern(ax, res['u_grid'], f"Final pattern u (centred on the starting {model['kind'].split(' (')[0]})")
     fig.colorbar(im, ax=ax, shrink=0.85)
 
-    # dispersion relation: which modes should grow
-    ax = fig.add_subplot(gs[1, half:])
-    Lambda = np.linspace(eigvals.min() * 1.05, 0, 400)
-    ax.plot(Lambda, growth_rates(model, diffusion, Lambda), color='0.6', lw=1.5, label='continuous')
-    ax.scatter(eigvals, growth, c=np.where(growth > 0, 'tab:red', 'tab:blue'), s=14, zorder=3,
-               label='network modes')
-    oscillatory = (growth > 0) & (np.abs(leading.imag) > 1e-9)
-    if oscillatory.any():
-        ax.scatter(eigvals[oscillatory], growth[oscillatory], s=60, facecolors='none', edgecolors='k',
-                   zorder=4, label='oscillatory (Im λ ≠ 0)')
-    ax.axhline(0, color='k', lw=0.8)
-    if show_target:
-        ax.axvline(cfg.target_mode, color='tab:green', ls='--', label=f'target Λ_m = {cfg.target_mode}')
-    ax.axvline(res['measured_mode'], color='tab:purple', ls=':', lw=2,
-               label=f"measured Λ = {res['measured_mode']:.2f}")
-    if growth.max() > 0:
-        top = growth.max()
-        ax.set_ylim(max(growth.min(), -3 * top), 1.5 * top)
-    else:  # every mode decays: show them all, with some room above zero
-        ax.set_ylim(1.1 * growth.min(), -0.2 * growth.min())
-    ax.set_xlabel('Laplacian eigenvalue Λ')
-    ax.set_ylabel('Growth rate Re(λ)')
-    ax.set_title('Dispersion relation (red = unstable)')
-    ax.legend(fontsize=9, loc='lower left')
+    # dispersion relation: which modes should grow (also drawn on its own below)
+    plot_dispersion(fig.add_subplot(gs[1, half:]), cfg, model, diffusion, net, growth, res, leading)
 
     # graph Fourier spectrum of the final pattern
     ax = fig.add_subplot(gs[2, :half])
@@ -592,6 +784,14 @@ def dashboard(cfg, model, diffusion, net, sim, growth, res, leading):
 
 
 fig = dashboard(cfg, model, diffusion, net, sim, growth, res, leading)
+
+# the dispersion relation in its own figure, e.g. for a report: dispersion_fig.savefig('dispersion.png', dpi=200)
+dispersion_fig, ax = plt.subplots(figsize=(7, 5), constrained_layout=True)
+plot_dispersion(ax, cfg, model, diffusion, net, growth, res, leading)
+ax.set_title(f"{model['name']}: dispersion relation (red = unstable)\nDu = {diffusion['Du']:.3g}, "
+             f"Dv = {diffusion['Dv']:.3g}, {len(net['xy'])} nodes, {net['mean_degree']:.1f} neighbours on average",
+             fontsize=11)
+plt.show()
 
 #%% 8. NO DIFFUSION: fixed points & stability
 # With Du = Dv = 0 the Laplacian term vanishes and every node is an independent copy of
@@ -774,7 +974,7 @@ if MODELS[cfg.model].param_plane is None:
     print(f"No param_plane set for '{cfg.model}' in MODELS - skipping the parameter-plane map.")
 else:
     plane = classify_parameter_plane(cfg)
-    plane_fig = plot_parameter_plane(cfg, *plane)
+    #plane_fig = plot_parameter_plane(cfg, *plane)
 
 #%% 10. PARAMETER PLANE WITH DIFFUSION: where does *this* network, with *these* Du, Dv, pattern?
 # Same (x, y) grid as cell 9, but now every Laplacian mode of the actual network is checked
@@ -852,8 +1052,7 @@ def plot_diffusion_plane(cfg, diffusion, n_nodes, xs, ys, outcome, wavelength_ma
 if MODELS[cfg.model].param_plane is not None:
     xs, ys, region, fields, names = plane
     outcome, wavelength_map, max_growth_map = classify_with_diffusion(diffusion, net, region, fields)
-    diffusion_plane_fig = plot_diffusion_plane(cfg, diffusion, len(net['xy']), xs, ys, outcome,
-                                               wavelength_map, names)
+    #diffusion_plane_fig = plot_diffusion_plane(cfg, diffusion, len(net['xy']), xs, ys, outcome, wavelength_map, names)
 
 #%% 11. ROBUSTNESS: repeat with different random initial conditions
 # Same network, parameters and run length; only the seed of the initial noise changes.
@@ -921,9 +1120,9 @@ def plot_repeats(cfg, model, diffusion, runs, res):
     return fig
 
 
-repeats = repeat_seeds(cfg, model, diffusion, net, growth, n_steps)
-summarise_repeats(cfg, repeats, res)
-repeats_fig = plot_repeats(cfg, model, diffusion, repeats, res)
+# repeats = repeat_seeds(cfg, model, diffusion, net, growth, n_steps)
+# summarise_repeats(cfg, repeats, res)
+# repeats_fig = plot_repeats(cfg, model, diffusion, repeats, res)
 
 #%% 12. SWEEP: target mode vs the mode that actually wins
 # For each target Λ_m in cfg.sweep_modes: redesign Du, Dv (same target_growth), note which discrete
@@ -1029,13 +1228,13 @@ def plot_sweep_examples(cfg, model, rows):
     return fig
 
 
-if not diffusion['designed']:
-    print(f"Du, Dv are fixed for '{cfg.model}' (not designed from a target mode) - skipping the target-mode sweep.")
-else:
-    sweep = sweep_target_modes(cfg, model, net)
-    summarise_sweep(sweep)
-    sweep_fig = plot_sweep(cfg, sweep)
-    sweep_examples_fig = plot_sweep_examples(cfg, model, sweep)
+# if not diffusion['designed']:
+#     print(f"Du, Dv are fixed for '{cfg.model}' (not designed from a target mode) - skipping the target-mode sweep.")
+# else:
+#     sweep = sweep_target_modes(cfg, model, net)
+#     summarise_sweep(sweep)
+#     sweep_fig = plot_sweep(cfg, sweep)
+#     sweep_examples_fig = plot_sweep_examples(cfg, model, sweep)
 
 #%% 13. PATTERN TYPE: sweep a kinetic parameter and watch spots turn into stripes
 # Uses MODELS[cfg.model].pattern_sweep = (param, values), e.g. BVAM's C: C = 0 is symmetric
@@ -1113,11 +1312,12 @@ def plot_pattern_sweep(cfg, name, rows):
     return fig
 
 
-if MODELS[cfg.model].pattern_sweep is None:
-    print(f"No pattern_sweep set for '{cfg.model}' in MODELS - skipping the pattern-type sweep.")
-else:
-    pattern_param, pattern_rows = sweep_pattern_type(cfg, net, n_steps)
-    pattern_fig = plot_pattern_sweep(cfg, pattern_param, pattern_rows)
+# HIDDEN
+# if MODELS[cfg.model].pattern_sweep is None:
+#     print(f"No pattern_sweep set for '{cfg.model}' in MODELS - skipping the pattern-type sweep.")
+# else:
+#     pattern_param, pattern_rows = sweep_pattern_type(cfg, net, n_steps)
+#     pattern_fig = plot_pattern_sweep(cfg, pattern_param, pattern_rows)
 
 #%% 14. SEEDED START: inject a patch of 'red' and watch it develop
 # No noise: the uniform state plus a disc of raised u in the centre (cfg.start_seed, default below).
@@ -1244,18 +1444,197 @@ else:
 seed_dev = seed_development(seeded_cfg, model, seeded_net, seeded_sim)
 print(f"Seeded start: {seed_dev['outcome']}"
       + (f", front speed ≈ {seed_dev['speed']:.3g}" if np.isfinite(seed_dev['speed']) else ''))
-seed_fig = plot_seed_development(seeded_cfg, model, seeded_net, seeded_sim, seed_dev)
 
-#%% 15. ANIMATION: the main run (cells 3-7) over time
-# Left: u on the grid (same colours as the dashboard). Right: pattern amplitude std(u), with a dot
-# marking the current frame - so you can see which phase (growth, saturation, rearranging) you're in.
+# HIDDEN
+#seed_fig = plot_seed_development(seeded_cfg, model, seeded_net, seeded_sim, seed_dev)
+
+#%% 15. ANIMATION: the main run (cells 3-7) over time, and what each node experiences
+# Top left: u on the grid (same colours as the dashboard), numbered circles = traced nodes.
+# Top right: pattern amplitude std(u), with a dot marking the current frame.
+# Bottom: u(t) at the traced nodes, with a cursor at the current frame.
+# Node experience (printed + maps): over the animated window (cfg.animation_window, or the second half of
+# the run) each node's oscillation period, amplitude and phase, how long it spends 'on', when it first
+# switched on, and how fast u changes - what a robot running this would need to sense and keep up with.
 # Same approach as animation.py (FuncAnimation + ffmpeg). Shown inline in the VS Code interactive
 # window; set cfg.animation_path to also save an .mp4 (ffmpeg) or .gif (pillow).
 
 import matplotlib.animation as animation
 
 
-def animate_pattern(cfg, model, net, sim, res):
+def repeat_time(d, step, tolerance=0.05):
+    """Shortest lag at which signal d (1-D, or one row per node -> pooled) repeats: the first autocorrelation
+    peak within `tolerance` of the best one, up to half the window. Returns (lag, correlation there)."""
+    d = np.atleast_2d(d)
+    n = d.shape[1]
+    ac = np.fft.irfft(np.abs(np.fft.rfft(d, n=2 * n, axis=1)) ** 2, axis=1)[:, :n].sum(axis=0)
+    ac = ac / max(ac[0], 1e-300) * n / (n - np.arange(n))  # normalise, and undo the shrinking overlap
+    below = np.where(ac[:n // 2] < 0)[0]  # only look past the first swing to the other side
+    lags = signal.find_peaks(ac[:n // 2])[0]
+    lags = lags[lags > below[0]] if len(below) else []
+    if len(lags) == 0:
+        return np.nan, np.nan
+    best = ac[lags].max()
+    lag = lags[np.argmax(ac[lags] >= best - tolerance)]
+    return lag * step, min(ac[lag], 1.0)
+
+
+def node_experience(cfg, net, sim):
+    """Per-node statistics of u over the analysis window (cfg.animation_window, or the second half of the run).
+    Moving: the node swings by > 2% of the window's u range (or repeats exactly, however small).
+    Periodic: its signal repeats (autocorrelation > 0.8 at its period, at least twice in the window).
+    Irregular (e.g. spatiotemporal chaos on big grids) nodes move but don't repeat - time between peaks and
+    its spread still describe the rhythm they feel."""
+    t, U = sim['t'], sim['u_log']
+    t_start, t_end = cfg.animation_window or (t[len(t) // 2], t[-1])
+    w = (t >= t_start) & (t <= t_end)
+    tw, Uw = t[w], U[:, w].astype(float)
+    step, span = tw[1] - tw[0], tw[-1] - tw[0]
+    lo, hi = np.nanmin(Uw), np.nanmax(Uw)  # window only, so the start-up transient doesn't set the scale
+    mid = (lo + hi) / 2  # 'on' threshold
+
+    detrended = signal.detrend(Uw, axis=1)
+    amplitude = (detrended.max(axis=1) - detrended.min(axis=1)) / 2  # half peak-to-peak
+    flat = amplitude <= 1e-6 * max(hi - lo, 1e-12)  # constant to float precision
+    nan = lambda: np.full(len(Uw), np.nan)
+    period, regularity, peaks_per_cycle, peak_interval, interval_spread = nan(), nan(), nan(), nan(), nan()
+    for i in np.where(~flat)[0]:
+        # period = how long until the signal repeats (autocorrelation), so a big + small bump is one cycle
+        period[i], regularity[i] = repeat_time(detrended[i], step)
+        # a peak counts if it stands out by 10% of the node's own swing
+        peaks = signal.find_peaks(detrended[i], prominence=0.2 * amplitude[i])[0]
+        if len(peaks) >= 2:
+            intervals = np.diff(tw[peaks])
+            peak_interval[i], interval_spread[i] = np.median(intervals), intervals.std() / np.median(intervals)
+        if np.isfinite(period[i]):
+            peaks_per_cycle[i] = len(peaks) * period[i] / span
+    periodic = np.isfinite(period) & (regularity > 0.8)
+    moving = periodic | (amplitude > 0.02 * (hi - lo))
+    period[~periodic] = peaks_per_cycle[~periodic] = np.nan
+    peak_interval[~moving] = interval_spread[~moving] = np.nan
+
+    # Whole-network rhythm: if the pattern repeats, its repeat time; otherwise the typical time between peaks
+    network_period, network_regularity = repeat_time(detrended[moving], step) if moving.any() else (np.nan, np.nan)
+    if not network_regularity > 0.8:
+        network_period = np.nan
+    rhythm = network_period if np.isfinite(network_period) else np.nanmedian(peak_interval) if moving.any() else np.nan
+    # phase of each node at that rhythm; Kuramoto R: 1 = every node in step, ~0 = phases spread (waves)
+    phase = np.where(moving, np.angle(detrended @ np.exp(-2j * np.pi * tw / rhythm)), np.nan)
+    synchrony = np.abs(np.exp(1j * phase[moving]).mean()) if moving.any() else np.nan
+
+    # how alike each node's trace is to its neighbours' (correlation, 1 = moves exactly with them)
+    z = detrended / np.maximum(detrended.std(axis=1, keepdims=True), 1e-300)
+    A = net['network'][0]
+    degree = A.sum(axis=0)
+    neighbour_corr = np.where(degree > 0, (A * (z @ z.T / len(tw))).sum(axis=1) / np.maximum(degree, 1), np.nan)
+    neighbour_corr[flat] = np.nan
+
+    above = U > mid
+    return {'window': (tw[0], tw[-1]), 'mid': mid, 'dt': cfg.dt,
+            'amplitude': amplitude, 'moving': moving, 'periodic': periodic, 'regularity': regularity,
+            'period': period, 'peaks_per_cycle': peaks_per_cycle,
+            'peak_interval': peak_interval, 'interval_spread': interval_spread,
+            'network_period': network_period, 'rhythm': rhythm,
+            'phase': phase, 'synchrony': synchrony, 'neighbour_corr': neighbour_corr,
+            'mean': Uw.mean(axis=1), 'time_on': (Uw > mid).mean(axis=1),
+            'arrival': np.where(above.any(axis=1), t[above.argmax(axis=1)], np.nan),
+            'max_rate': np.abs(np.diff(Uw, axis=1)).max(axis=1) / step,
+            'degree': degree}
+
+
+def summarise_node_experience(exp):
+    q = lambda x: np.nanpercentile(x, [25, 50, 75])
+    fmt = lambda x: f"{x[1]:.3g}  (IQR {x[0]:.3g}-{x[2]:.3g})"
+    moving, periodic = exp['moving'], exp['periodic']
+    print(f"Node experience, t = {exp['window'][0]:.4g}-{exp['window'][1]:.4g} ({len(moving)} nodes)")
+    print(f"  Moving           {moving.mean():.0%} of nodes  (swing > 2% of the u range)")
+    print(f"  Periodic         {periodic.mean():.0%} of nodes  (signal repeats exactly; the rest move irregularly)")
+    T = exp['network_period']
+    if np.isfinite(T):
+        print(f"  Network period   {T:.4g}  (whole pattern repeats) -> frequency {1 / T:.3g} per time unit, "
+              f"{T / exp['dt']:.0f} steps per cycle")
+    elif moving.any():
+        print(f"  Network period   none - the pattern never repeats (irregular, e.g. spatiotemporal chaos)")
+    if periodic.any():
+        counts = np.round(exp['peaks_per_cycle'][periodic]).astype(int)
+        print("  Peaks per cycle  " + ', '.join(f"{c}: {(counts == c).mean():.0%}" for c in np.unique(counts))
+              + "  (of periodic nodes; 2+ = a big and a small bump each period)")
+    if np.isfinite(exp['peak_interval']).any():
+        print(f"  Between peaks    {fmt(q(exp['peak_interval']))}  time units "
+              f"(cycle-to-cycle spread {100 * np.nanmedian(exp['interval_spread']):.2g} %, ~0 = clockwork)")
+    if moving.any():
+        print(f"  Synchrony        R = {exp['synchrony']:.2f}  (at period {exp['rhythm']:.3g}; 1 = all nodes in step, ~0 = waves)")
+        print(f"  Neighbour corr.  {fmt(q(exp['neighbour_corr']))}  (1 = moves exactly with its neighbours)")
+    print(f"  Amplitude        {fmt(q(exp['amplitude']))}  (half peak-to-peak of u)")
+    print(f"  Mean u           {fmt(q(exp['mean']))}")
+    print(f"  Time 'on'        {fmt(100 * q(exp['time_on']))} %  (u > {exp['mid']:.3g})")
+    if np.isfinite(exp['arrival']).any():
+        print(f"  First on at      t = {fmt(q(exp['arrival']))}  ({np.isfinite(exp['arrival']).mean():.0%} of nodes ever on)")
+    rate = q(exp['max_rate'])
+    print(f"  Max |du/dt|      {fmt(rate)}  -> up to {rate[2] * exp['dt']:.2g} change in u per step")
+    print(f"  Neighbours       {exp['degree'].min():.0f}-{exp['degree'].max():.0f}")
+
+
+def sample_node_indices(cfg, net):
+    """cfg.sample_nodes nodes from the centre out to the edge (so a seeded run shows the wave arriving)."""
+    distance = np.hypot(*(net['xy'] - (cfg.grid_size + 1) / 2).T)
+    order = np.argsort(distance, kind='stable')
+    return order[np.unique(np.linspace(0, len(order) - 1, cfg.sample_nodes).astype(int))]
+
+
+def mark_nodes(ax, net, samples):
+    for n, i in enumerate(samples):
+        x, y = net['xy'][i] - 1
+        ax.plot(x, y, 'o', ms=13, mfc='none', mec=f'C{n}', mew=2)
+        ax.text(x, y, str(n + 1), color=f'C{n}', ha='center', va='center', fontsize=7, fontweight='bold')
+
+
+def plot_node_experience(cfg, model, net, exp, samples):
+    maps = [('amplitude', 'Amplitude (½ peak-to-peak)', 'magma', None),
+            ('peak_interval', 'Time between peaks', 'viridis', None),
+            ('interval_spread', 'Spread of time between peaks\n(0 = clockwork)', 'magma', None),
+            ('regularity', 'Regularity (autocorrelation\nat best repeat, > 0.8 = periodic)', 'cividis', (0, 1)),
+            ('period', 'Period (periodic nodes only)', 'viridis', None),
+            ('peaks_per_cycle', 'Peaks per period', 'cividis', None),
+            ('phase', f"Phase at period {exp['rhythm']:.3g}", 'twilight', (-np.pi, np.pi)),
+            ('neighbour_corr', 'Correlation with neighbours', 'RdBu_r', (-1, 1)),
+            ('time_on', "Fraction of time 'on'", 'Reds', (0, 1)),
+            ('arrival', "First time 'on'", 'viridis', None),
+            ('max_rate', 'Max |du/dt|', 'magma', None)]
+    fig, axes = plt.subplots(3, 4, figsize=(16, 10.5), constrained_layout=True)
+    for ax, (key, label, cmap, limits) in zip(axes.flat, maps):
+        values = exp[key].astype(float)
+        if not np.isfinite(values).any():
+            ax.text(0.5, 0.5, f"{label}:\nnone", ha='center', va='center', transform=ax.transAxes)
+            ax.set_axis_off()
+            continue
+        vmin, vmax = limits or np.nanpercentile(values, [2, 98])
+        im = ax.imshow(to_grid(values, net['xy'], cfg.grid_size), cmap=cmap, vmin=vmin, vmax=vmax,
+                       origin='lower', interpolation='nearest')
+        fig.colorbar(im, ax=ax, shrink=0.8)
+        ax.set_title(label, fontsize=10)
+        ax.set_axis_off()
+    mark_nodes(axes.flat[0], net, samples)
+
+    ax = axes.flat[-1]
+    if np.isfinite(exp['peak_interval']).any():
+        ax.hist(exp['peak_interval'][np.isfinite(exp['peak_interval'])], bins=20, color='tab:purple', alpha=0.8)
+        ax.axvline(exp['rhythm'], color='k', ls='--', lw=1,
+                   label='network period' if np.isfinite(exp['network_period']) else 'median')
+        ax.legend(fontsize=8)
+        ax.set_xlabel('time between peaks')
+        ax.set_title(f"{exp['moving'].sum()} moving nodes, {exp['periodic'].sum()} periodic", fontsize=10)
+    else:
+        ax.hist(exp['amplitude'], bins=20, color='0.5')
+        ax.set_xlabel('amplitude')
+        ax.set_title('Amplitude (no node moves)', fontsize=10)
+    ax.set_ylabel('nodes')
+    fig.suptitle(f"{model['name']}: what each node experiences, t = {exp['window'][0]:.4g}-{exp['window'][1]:.4g}",
+                 fontsize=12)
+    plt.show()
+    return fig
+
+
+def animate_pattern(cfg, model, net, sim, res, exp, samples):
     u0 = model['steady_state'][0]
     t_start, t_end = cfg.animation_window or (sim['t'][0], sim['t'][-1])
     first, last = np.searchsorted(sim['t'], t_start), np.searchsorted(sim['t'], t_end, side='right') - 1
@@ -1263,12 +1642,16 @@ def animate_pattern(cfg, model, net, sim, res):
     print(f"Animation: {len(frames)} frames, one every {(sim['t'][last] - sim['t'][first]) / len(frames):.3g} time units")
     lim = max(np.nanmax(np.abs(sim['u_log'][:, frames] - u0)), 1e-3 * max(abs(u0), 1))
 
-    fig, (ax_u, ax_amp) = plt.subplots(1, 2, figsize=(10, 4.5), constrained_layout=True,
-                                       gridspec_kw={'width_ratios': [1, 1.3]})
+    fig = plt.figure(figsize=(11, 8), constrained_layout=True)
+    gs = GridSpec(2, 2, figure=fig, width_ratios=[1, 1.3], height_ratios=[1.2, 1])
+    ax_u, ax_amp = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1])
+    ax_nodes = fig.add_subplot(gs[1, :])
+
     im = ax_u.imshow(to_grid(sim['u_log'][:, frames[0]], net['xy'], cfg.grid_size), cmap='bwr',
                      vmin=u0 - lim, vmax=u0 + lim, origin='lower', interpolation='nearest')
     ax_u.set_axis_off()
     fig.colorbar(im, ax=ax_u, shrink=0.8)
+    mark_nodes(ax_u, net, samples)
     title = ax_u.set_title('')
 
     ax_amp.semilogy(sim['t'], res['amplitude'], color='k', lw=1.5)
@@ -1278,14 +1661,38 @@ def animate_pattern(cfg, model, net, sim, res):
     dot, = ax_amp.semilogy([], [], 'o', color='tab:purple', ms=8)
     ax_amp.set_xlabel('time')
     ax_amp.set_ylabel('pattern amplitude std(u)')
-    ax_amp.set_title(f"→ {res['observed']}, {res['shape']['type']}", fontsize=10)
+    moving, periodic = exp['moving'], exp['periodic']
+    rhythm = (f"network period ≈ {exp['network_period']:.3g}" if np.isfinite(exp['network_period'])
+              else f"no exact repeat, peaks every ≈ {np.nanmedian(exp['peak_interval']):.3g}"
+              if np.isfinite(exp['peak_interval']).any() else None)
+    note = (f"{rhythm}, node amplitude ≈ {np.median(exp['amplitude'][moving]):.3g}, synchrony R = "
+            f"{exp['synchrony']:.2f}  ({moving.mean():.0%} moving, {periodic.mean():.0%} periodic)"
+            if rhythm else f"no oscillation ({moving.mean():.0%} of nodes still drifting), "
+                           f"amplitude ≈ {np.median(exp['amplitude']):.3g}")
+    ax_amp.set_title(f"→ {res['observed'].split(' (')[0]}, {res['shape']['type']}", fontsize=10)
+
+    span = slice(first, last + 1)
+    for n, i in enumerate(samples):
+        u_i = sim['u_log'][i, span].astype(float)
+        label = (f"{n + 1}: {exp['degree'][i]:.0f} nbrs, ±{exp['amplitude'][i]:.2g}"
+                 + (f", T {exp['period'][i]:.3g}, {exp['peaks_per_cycle'][i]:.0f} pk/T" if periodic[i]
+                    else f", pk ~{exp['peak_interval'][i]:.3g} irreg." if moving[i] else ""))
+        ax_nodes.plot(sim['t'][span], u_i, color=f'C{n}', lw=1.2, label=label)
+    ax_nodes.axhline(exp['mid'], color='0.6', ls=':', lw=1, label="'on' threshold")
+    cursor = ax_nodes.axvline(sim['t'][frames[0]], color='k', lw=1)
+    ax_nodes.set_xlim(sim['t'][first], sim['t'][last])
+    ax_nodes.set_xlabel('time')
+    ax_nodes.set_ylabel('u at node')
+    ax_nodes.set_title(note, fontsize=10)
+    ax_nodes.legend(fontsize=7, ncol=min(4, len(samples) + 1), loc='upper right')
 
     def update(k):
         i = frames[k]
         im.set_data(to_grid(sim['u_log'][:, i], net['xy'], cfg.grid_size))
         dot.set_data([sim['t'][i]], [res['amplitude'][i]])
+        cursor.set_xdata([sim['t'][i]] * 2)
         title.set_text(f"{model['name']}   t = {sim['t'][i]:.4g}")
-        return im, dot, title
+        return im, dot, cursor, title
 
     ani = animation.FuncAnimation(fig, update, frames=len(frames), interval=1000 / cfg.animation_fps,
                                   blit=False, repeat=True)
@@ -1308,7 +1715,99 @@ def animate_pattern(cfg, model, net, sim, res):
     return ani
 
 
-pattern_animation = animate_pattern(cfg, model, net, sim, res)
+experience = node_experience(cfg, net, sim)
+samples = sample_node_indices(cfg, net)
+summarise_node_experience(experience)
+
+# INDIVIDUAL NODE EXPERIENCES
+#experience_fig = plot_node_experience(cfg, model, net, experience, samples)
+
+# PATTERN ANIMATION
+pattern_animation = animate_pattern(cfg, model, net, sim, res, experience, samples)
+
+#%% 15b. CUT THE RING: remove robots from the developed pattern and keep running (ring -> horseshoe)
+# At the end of the main run (t = T) the cfg.cut_nodes robots nearest the bottom of the ring are removed, and
+# the rest carries on from its developed state for cfg.cut_T. On a one-wide ring (shapes.ring_line_check) one
+# robot opens the loop: the robots either side become free ends, and links across the gap (threshold >= 2)
+# are dropped. A thick ring (shapes.ring_check) needs a whole wedge across the band, so a larger cut_nodes.
+
+def loop_angle(cfg, xy):
+    """Angle of each node round the grid centre: 0 at the bottom, then right, top, left (as chain_links)."""
+    xy = xy - (cfg.grid_size + 1) / 2
+    return np.arctan2(xy[:, 0], -xy[:, 1]) % (2 * np.pi)
+
+
+def cut_ring(cfg, net, sim):
+    """Network without the cfg.cut_nodes robots nearest the bottom, its nodes starting from the end of sim."""
+    angle = loop_angle(cfg, net['xy'])
+    keep = np.ones(len(angle), dtype=bool)
+    keep[np.argsort(np.minimum(angle, 2 * np.pi - angle))[:cfg.cut_nodes]] = False
+    A, _, nodes = net['network']
+    nodes = [copy.copy(node) for node, k in zip(nodes, keep) if k]  # copies: the main run's nodes keep their start
+    for node, u, v in zip(nodes, sim['u'][keep], sim['v'][keep]):
+        node.u, node.v = u, v
+    A = A[np.ix_(keep, keep)]
+    if chain_type(cfg) == 'closed':  # relink as an open chain (drops edge_dropout / missing_nodes changes)
+        A = chain_links(cfg, A, nodes, chain='open')
+    D = np.diag(A.sum(axis=0))
+    eigvals, eigvecs = np.linalg.eigh(A - D)
+    return {**net, 'initial': np.column_stack([sim['u'][keep], sim['v'][keep]]), 'xy': net['xy'][keep],
+            'network': (A, D, nodes), 'eigvals': eigvals, 'eigvecs': eigvecs, 'mean_degree': np.diag(D).mean(),
+            'n_components': connected_components(A, directed=False)[0], 'isolated': int((np.diag(D) == 0).sum()),
+            'kept': keep}
+
+
+def plot_cut(cfg, model, net, sim, cut_net, cut_sim, n_columns=800):
+    """Kymograph of u round the ring before and after the cut, and the pattern just before, after and at the end."""
+    u0 = model['steady_state'][0]
+    keep = cut_net['kept']
+    order = np.argsort(loop_angle(cfg, net['xy']))
+    before = np.arange(0, len(sim['t']), max(len(sim['t']) // n_columns, 1))
+    after = np.arange(0, len(cut_sim['t']), max(len(cut_sim['t']) // n_columns, 1))
+    u_after = np.full((len(keep), len(after)), np.nan)  # removed robots stay as blank rows
+    u_after[keep] = cut_sim['u_log'][:, after]
+    kymo = np.hstack([sim['u_log'][:, before], u_after])[order]
+    times = np.concatenate([sim['t'][before], cut_sim['t'][after]])
+    lim = np.nanmax(np.abs(kymo - u0)) or 1
+    cmap = plt.get_cmap('bwr').copy()
+    cmap.set_bad('0.8')
+    style = dict(cmap=cmap, vmin=u0 - lim, vmax=u0 + lim, interpolation='nearest')
+
+    fig = plt.figure(figsize=(11, 7.5), constrained_layout=True)
+    gs = GridSpec(2, 3, figure=fig, height_ratios=[1.3, 1])
+    ax = fig.add_subplot(gs[0, :])
+    im = ax.imshow(kymo, aspect='auto', origin='lower', extent=[times[0], times[-1], 0, len(order)], **style)
+    ax.axvline(sim['t'][-1], color='k', lw=1.5, ls='--')
+    ax.text(sim['t'][-1], len(order), f"  cut: {cfg.cut_nodes} robot(s) removed", va='bottom', fontsize=9)
+    ax.set_xlabel('t')
+    ax.set_ylabel('robot, round the ring\n(bottom → right → top → left)')
+    fig.colorbar(im, ax=ax, label='u', pad=0.01)
+
+    gone = net['xy'][~keep]
+    soon = min(len(cut_sim['t']) - 1, len(cut_sim['t']) // 10)
+    panels = [(sim['u'], net['xy'], f"before the cut (t = {sim['t'][-1]:.3g})"),
+              (cut_sim['u_log'][:, soon], cut_net['xy'], f"after (t = {cut_sim['t'][soon]:.3g})"),
+              (cut_sim['u'], cut_net['xy'], f"end (t = {cut_sim['t'][-1]:.3g})")]
+    for k, (values, xy, title) in enumerate(panels):
+        ax = fig.add_subplot(gs[1, k])
+        ax.imshow(to_grid(values, xy, cfg.grid_size), origin='lower', **style)
+        ax.plot(gone[:, 0] - 1, gone[:, 1] - 1, 'kx', ms=8, mew=2)
+        ax.set_title(title, fontsize=10)
+        ax.set_axis_off()
+    fig.suptitle(f"{model['name']}: ring cut into a horseshoe ({len(keep)} -> {keep.sum()} robots)", fontsize=12)
+    plt.show()
+    return fig
+
+
+if cfg.cut_nodes > 0:
+    cut_net = cut_ring(cfg, net, sim)
+    cut_sim = run(cfg, model, diffusion, cut_net, int(round((cfg.cut_T or cfg.T) / cfg.dt)))
+    cut_sim['t'] = cut_sim['t'] + sim['t'][-1]  # continue the main run's clock
+    print(f"Cut at t = {sim['t'][-1]:.3g}: removed {cfg.cut_nodes} robot(s) -> {cut_net['kept'].sum()} left in "
+          f"{cut_net['n_components']} piece(s), mean neighbours {cut_net['mean_degree']:.2f}")
+    if cut_net['n_components'] > 1:
+        print("WARNING: the cut split the domain into separate pieces - remove fewer robots.")
+    cut_fig = plot_cut(cfg, model, net, sim, cut_net, cut_sim)
 
 #%% 16. BEHAVIOUR MAP: simulate a grid of kinetic parameters and sort what happens (Pearson-style)
 # Uses MODELS[cfg.model].behaviour_map = (x_param, x_values, y_param, y_values). Every point is a

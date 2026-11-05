@@ -1,4 +1,5 @@
 import numpy as np
+from functools import lru_cache
 
 mask_nodes = None
 
@@ -64,6 +65,60 @@ def triangle_outline_check(r, coords):
     # - inside horizontal side: 0 ≤ x ≤ r
     # - below or on hypotenuse: x + y ≤ r
     return (x >= 0) & (y >= 0) & (x <= r) & (y <= r) & (x + y <= r)
+
+def ring_check(r, coords, inner=0.5):
+    # annulus centred in the [1, 2r] square: outer radius r, inner radius inner * r
+    coords = np.atleast_2d(coords)
+    x = coords[:, 0] - (r + 0.5)
+    y = coords[:, 1] - (r + 0.5)
+    distance = np.hypot(x, y)
+    return (distance <= r) & (distance >= inner * r)
+
+def horseshoe_check(r, coords, inner=0.5, gap=60):
+    # ring with an opening of `gap` degrees at the bottom
+    coords = np.atleast_2d(coords)
+    x = coords[:, 0] - (r + 0.5)
+    y = coords[:, 1] - (r + 0.5)
+    angle_from_bottom = np.degrees(np.abs(np.arctan2(x, -y)))  # 0 straight down, 180 straight up
+    return ring_check(r, coords, inner) & (angle_from_bottom >= gap / 2)
+
+@lru_cache(maxsize=None)
+def _circle_cells(r):
+    # one-cell-thick loop of lattice cells round a circle of radius r - 0.5 centred in the [1, 2r] square
+    centre, radius = r + 0.5, r - 0.5
+    angles = np.linspace(0, 2 * np.pi, int(8 * np.pi * radius), endpoint=False)
+    cells = np.unique(np.round(centre + radius * np.column_stack([np.cos(angles), np.sin(angles)])), axis=0)
+    cells = cells[np.argsort(np.arctan2(cells[:, 1] - centre, cells[:, 0] - centre))]
+    # drop corner cells whose two neighbours along the loop already touch (diagonally), so every cell has
+    # exactly two neighbours along the loop
+    changed = True
+    while changed:
+        changed = False
+        for k in range(len(cells)):
+            before, after = cells[k - 1], cells[(k + 1) % len(cells)]
+            if np.abs(before - after).max() <= 1:
+                cells = np.delete(cells, k, axis=0)
+                changed = True
+                break
+    return frozenset(map(tuple, cells.astype(int)))
+
+def ring_line_check(r, coords):
+    # ring one node wide: run_turing links each node only to the next one round the loop (chain = 'closed')
+    coords = np.atleast_2d(coords)
+    cells = _circle_cells(r)
+    return np.array([(int(x), int(y)) in cells for x, y in coords])
+
+ring_line_check.chain = 'closed'
+
+def horseshoe_line_check(r, coords, gap=60):
+    # ring_line_check with an opening of `gap` degrees at the bottom: an open chain with two free ends
+    coords = np.atleast_2d(coords)
+    x = coords[:, 0] - (r + 0.5)
+    y = coords[:, 1] - (r + 0.5)
+    angle_from_bottom = np.degrees(np.abs(np.arctan2(x, -y)))
+    return ring_line_check(r, coords) & (angle_from_bottom >= gap / 2)
+
+horseshoe_line_check.chain = 'open'
 
 def line_check(r, coords):
     coords = np.atleast_2d(coords)
